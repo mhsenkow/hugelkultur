@@ -88,28 +88,52 @@ canvas {
 #hearth-label.wet { color: var(--wet); }
 #carry-label.holding { color: #8a5a28; }
 
-#ticker, .hint {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.35;
-}
-
 #ticker {
   display: inline-block;
   max-width: 100%;
-  margin-top: 8px;
+  margin: 8px 0 0;
   padding: 6px 12px;
   border-radius: 999px;
   color: #3e4a46;
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.carry {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+.carry svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.carry svg[hidden] { display: none; }
+
+.foot {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(560px, calc(100vw - 240px));
+  pointer-events: none;
+  text-align: center;
 }
 
 .hint {
+  margin: 0;
   color: var(--muted);
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 11px;
-  padding-left: 12px;
+  line-height: 1.35;
 }
 
 .tools {

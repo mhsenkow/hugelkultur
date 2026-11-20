@@ -3,7 +3,6 @@ import { drawMotions } from './motions.js';
 import { drawWeather } from './weather.js';
 import { beginMound } from './growth.js';
 import { INK, GRID, cellAt, hash } from './world.js';
-import { floraName } from './species.js';
 import { facedCell } from './avatar.js';
 
 const PAINT = { width: 0.062, color: INK.stick, density: 2.2, emissive: false, depth: true };
@@ -142,7 +141,7 @@ export function updateSticks(sim, dt) {
     const tree = sim.trees[Math.floor(hash(sim.time * 1000 + 4) * sim.trees.length)];
     const i = tree.i + Math.floor(hash(sim.year * 9 + sim.seasonTime) * 3) - 1;
     const k = tree.k + Math.floor(hash(sim.seasonTime * 13 + 2) * 3) - 1;
-    if (dropFrom(sim, tree, i, k)) sim.events.push({ type: 'shed', text: `A stick falls from the ${floraName(tree.kind).toLowerCase()}.` });
+    if (dropFrom(sim, tree, i, k)) sim.events.push({ type: 'shed', text: 'A stick falls.' });
   }
 
   const st = sim.character.st;
@@ -153,7 +152,7 @@ export function updateSticks(sim, dt) {
       if (Math.hypot(tree.x - st.x, tree.z - st.z) > 0.78) continue;
       tree.cooldown = 1.35;
       const dropped = dropFrom(sim, tree, tree.i, tree.k - 1) | dropFrom(sim, tree, tree.i + 1, tree.k);
-      if (dropped) sim.events.push({ type: 'shake', text: 'The crown shakes, and sticks fall.' });
+      if (dropped) sim.events.push({ type: 'shake', text: 'Sticks fall.' });
     }
   }
 
@@ -175,23 +174,23 @@ export function updateSticks(sim, dt) {
   }
   const cell = facedCell(sim);
   if (!cell) {
-    sim.events.push({ type: 'note', text: 'The cube ends there.' });
+    sim.events.push({ type: 'note', text: 'The cube ends.' });
     return;
   }
   if (cell.hearth) {
-    sim.events.push({ type: 'note', text: 'The idol stands there.' });
+    sim.events.push({ type: 'note', text: 'The idol is there.' });
     return;
   }
   if (cell.berm) {
-    sim.events.push({ type: 'note', text: 'That ground has already grown over.' });
+    sim.events.push({ type: 'note', text: 'The ground is grown.' });
     return;
   }
   if (cell.plot) {
-    sim.events.push({ type: 'note', text: 'That bed is for the garden.' });
+    sim.events.push({ type: 'note', text: 'That is a bed.' });
     return;
   }
   if (cell.layers >= 5) {
-    sim.events.push({ type: 'note', text: 'That stack will not take another stick.' });
+    sim.events.push({ type: 'note', text: 'The stack is full.' });
     return;
   }
   cell.layers += 1;
@@ -202,8 +201,8 @@ export function updateSticks(sim, dt) {
     return;
   }
   const placed = cell.layers === 1
-    ? 'The first stick of a stack.'
-    : `The stack is ${cell.layers} sticks deep.`;
+    ? 'You set down a stick.'
+    : `The mound is ${cell.layers} sticks. It is good.`;
   sim.events.push({ type: 'place', text: placed });
 }
 

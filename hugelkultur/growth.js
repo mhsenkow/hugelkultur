@@ -7,17 +7,17 @@ const LITTER = { width: 0.05, color: INK.stick, density: 2.1, emissive: false, d
 const DRIFT = { width: 0.06, color: 6, density: 2.1, emissive: false, depth: true };
 
 const CAUSE = {
-  tend: 'She finishes the stack. It settles into a mound.',
-  leaf: 'Leaves bury a stack. It becomes a mound.',
-  snow: 'Snow presses a stack into a mound.',
-  rain: 'Rain soaks a stack down into a mound.'
+  tend: 'It is a mound. It is good.',
+  leaf: 'Leaves make the mound. It is good.',
+  snow: 'Snow makes the mound. It is good.',
+  rain: 'Rain makes the mound. It is good.'
 };
 
 const RICHER = {
-  leaf: 'The mound takes the leaves.',
-  snow: 'Snow settles into the mound.',
-  rain: 'Rain works deeper into the mound.',
-  tend: 'She turns the mound by hand.'
+  leaf: 'The mound takes the leaves. It is good.',
+  snow: 'The mound takes the snow. It is good.',
+  rain: 'The mound takes the rain. It is good.',
+  tend: 'You turn the mound. It is good.'
 };
 
 export function beginMound(sim, cell, cause) {

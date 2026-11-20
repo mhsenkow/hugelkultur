@@ -192,8 +192,12 @@ function paintHud() {
   const season = seasonOf(sim);
   seasonPip.style.background = season.pip;
   seasonLabel.textContent = `${season.id} · Y${sim.year} · ${season.edge}`;
-  carryLabel.textContent = sim.carrying ? 'a stick' : sim.held ? floraById(sim.held)?.name || sim.held : 'empty';
-  carryLabel.classList.toggle('holding', sim.carrying);
+  const carry = sim.carrying ? 'stick' : sim.held || 'empty';
+  const carryNames = { empty: 'nothing', stick: 'a stick', carrot: 'a carrot', turnip: 'a turnip', mushroom: 'a mushroom' };
+  const carryKey = carryLabel.querySelector(`svg[data-carry="${carry}"]`) ? carry : 'empty';
+  for (const icon of carryLabel.querySelectorAll('svg')) icon.hidden = icon.dataset.carry !== carryKey;
+  carryLabel.setAttribute('aria-label', carryNames[carryKey] || carry);
+  carryLabel.classList.toggle('holding', carryKey !== 'empty');
   const paceLabel = document.querySelector('#pace-label');
   const quick = sim.haste > 0;
   paceLabel.hidden = !quick;
@@ -697,7 +701,7 @@ function ensureSpirit(id) {
 
 function chooseSpirit(id) {
   const changed = wearSpirit(sim, id);
-  if (changed) say(`The spirit gathers into ${spiritById(id).name}.`);
+  if (changed) say(spiritById(id).name);
   if (!document.querySelector('#spirits').hidden) {
     ensureSpirit(id);
     paintSpirits(true);
@@ -741,7 +745,7 @@ function boot() {
   sim = buildWorld(kit, { createFrame: createStickSystem, createAvatar, drawGrowth, createWater });
   renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
   applyLook();
-  say('Keep the idol dry. The circle can take water. Finish a stack, or leave it for the weather.');
+  say('Keep the idol dry.');
   paintHud();
   requestAnimationFrame(frame);
 }

@@ -3,10 +3,10 @@ import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth } from './world.js';
 export const SEASON_LENGTH = 52;
 
 export const SEASONS = [
-  { id: 'SPR', edge: 'N', bit: FLOW.SPR, pip: '#4fd18b', inflow: 0.18, drain: 0.006, friction: 0.16, line: 'Spring rain finds the northern tendril.' },
-  { id: 'SUM', edge: 'E', bit: FLOW.SUM, pip: '#e0a04a', inflow: 0.07, drain: 0.055, friction: 0.22, line: 'Summer. The light holds, and the east drinks.' },
-  { id: 'AUT', edge: 'S', bit: FLOW.AUT, pip: '#d97736', inflow: 0.22, drain: 0.008, friction: 0.14, line: 'Autumn. Leaves fall across the cube. Water pushes from the south.' },
-  { id: 'WIN', edge: 'W', bit: FLOW.WIN, pip: '#9fd4e8', inflow: 0.09, drain: 0.014, friction: 0.4, line: 'Winter. Snow settles. A slow finger crawls from the west.' }
+  { id: 'SPR', edge: 'N', bit: FLOW.SPR, pip: '#4fd18b', inflow: 0.18, drain: 0.006, friction: 0.16, line: 'Spring. Rain from the north.' },
+  { id: 'SUM', edge: 'E', bit: FLOW.SUM, pip: '#e0a04a', inflow: 0.07, drain: 0.055, friction: 0.22, line: 'Summer. It is clear.' },
+  { id: 'AUT', edge: 'S', bit: FLOW.AUT, pip: '#d97736', inflow: 0.22, drain: 0.008, friction: 0.14, line: 'Autumn. Leaves fall.' },
+  { id: 'WIN', edge: 'W', bit: FLOW.WIN, pip: '#9fd4e8', inflow: 0.09, drain: 0.014, friction: 0.4, line: 'Winter. Snow.' }
 ];
 
 const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
@@ -109,7 +109,7 @@ export function updateWater(sim, dt) {
   else sim.flood = Math.max(0, sim.flood - dt * 0.45);
   if (sim.flood >= 6) {
     sim.over = true;
-    sim.events.push({ type: 'flood', text: 'Water climbed the pedestal.' });
+    sim.events.push({ type: 'flood', text: 'The idol is wet.' });
   }
 }
 

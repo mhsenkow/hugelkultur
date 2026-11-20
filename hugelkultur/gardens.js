@@ -57,7 +57,7 @@ export function updateGardens(sim, dt, playerDriving) {
     if (sim.haste <= 0) {
       sim.haste = 0;
       sim.pace = 1;
-      sim.events.push({ type: 'note', text: 'Her step settles.' });
+      sim.events.push({ type: 'note', text: 'You are slow.' });
     }
   }
   if (sim.eatQueued) {
@@ -68,7 +68,7 @@ export function updateGardens(sim, dt, playerDriving) {
       sim.seen.add('eat');
       sim.pace = Math.max(sim.pace, kind?.pace || 1.4);
       sim.haste = Math.min(16, Math.max(sim.haste, 0) + (kind?.lasts || 8));
-      sim.events.push({ type: 'eat', text: `${kind?.name || 'A bite'}. She moves faster.` });
+      sim.events.push({ type: 'eat', text: `You eat the ${(kind?.name || 'bite').replace(/^Meadow /, '').toLowerCase()}. You are quick.` });
       sim.held = null;
     }
   }
@@ -92,8 +92,7 @@ export function updateGardens(sim, dt, playerDriving) {
       t: 0,
       dur: 0.48
     });
-    const hands = sim.voice?.pos || 'her';
-    sim.events.push({ type: 'take', text: `${kind?.name || 'It'} comes up in ${hands} hands. Space takes a bite.` });
+    sim.events.push({ type: 'take', text: `You pick up a ${(kind?.name || 'crop').replace(/^Meadow /, '').toLowerCase()}.` });
     break;
   }
 }
