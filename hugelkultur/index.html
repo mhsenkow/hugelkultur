@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hugelkultur</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="view" aria-label="Isometric forest clearing"></canvas>
+
+  <header class="hud">
+    <div class="cluster">
+      <div class="pill" id="status-pill">
+        <span id="season-pip" class="pip"></span>
+        <span id="spirit-label">Cloud boy</span>
+        <span class="rule"></span>
+        <span id="season-label">SPR · Y1 · N</span>
+        <span class="rule"></span>
+        <span id="carry-label">empty</span>
+        <span class="rule" id="pace-rule" hidden></span>
+        <span id="pace-label" hidden>quick</span>
+        <span class="rule"></span>
+        <span id="hearth-label">idol dry</span>
+      </div>
+      <p id="ticker">The clearing is growing…</p>
+      <p class="hint">Click her, the idol, or a crop · Drag turns, right-drag slides · Scroll toward the pointer · Double-click the ground comes home</p>
+    </div>
+    <div class="tools">
+      <button id="turn-left" type="button" title="Square the view left">↺</button>
+      <button id="turn-right" type="button" title="Square the view right">↻</button>
+      <button id="sound" type="button" title="Sound" aria-pressed="true">♪</button>
+      <button id="look-toggle" type="button" title="Dots" aria-expanded="false" aria-controls="look-panel">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="4.5" cy="4.5" r="1.35" fill="currentColor"/>
+          <circle cx="11.5" cy="4.5" r="1.35" fill="currentColor"/>
+          <circle cx="4.5" cy="11.5" r="1.35" fill="currentColor"/>
+          <circle cx="11.5" cy="11.5" r="1.35" fill="currentColor"/>
+        </svg>
+      </button>
+      <button id="restart" type="button" title="Restart">⟲</button>
+    </div>
+  </header>
+
+  <aside id="look-panel" class="look" hidden>
+    <p class="eyebrow">Look</p>
+    <h2>Dots</h2>
+    <p class="look-note">Move these while you watch. What you leave is what stays.</p>
+    <label>
+      <span>Pixels</span>
+      <output id="look-pixels-out">3</output>
+      <input id="look-pixels" type="range" min="1" max="6" step="1" value="3">
+    </label>
+    <label>
+      <span>Dots</span>
+      <output id="look-dots-out">62</output>
+      <input id="look-dots" type="range" min="0" max="100" step="1" value="62">
+    </label>
+    <label>
+      <span>Ink</span>
+      <output id="look-ink-out">5</output>
+      <input id="look-ink" type="range" min="0" max="40" step="1" value="5">
+    </label>
+    <label>
+      <span>Grain</span>
+      <output id="look-grain-out">45</output>
+      <input id="look-grain" type="range" min="0" max="100" step="1" value="45">
+    </label>
+    <div class="look-patterns" role="group" aria-label="Dot pattern">
+      <button type="button" data-pattern="bayer" aria-pressed="true">Grid</button>
+      <button type="button" data-pattern="blue-noise" aria-pressed="false">Scatter</button>
+    </div>
+    <button id="look-reset" type="button">Original</button>
+  </aside>
+
+  <!-- Flora library. The lower-left mark is the seed of admin mode. -->
+  <div class="flora-dock">
+    <aside id="flora" class="flora" hidden>
+      <div class="flora-stage">
+        <canvas id="specimen" aria-label="One plant from the library"></canvas>
+        <div class="flora-caption">
+          <p class="eyebrow" id="specimen-group">Tree</p>
+          <h2 id="specimen-name">White oak</h2>
+          <p id="specimen-note"></p>
+          <p id="specimen-state" class="state"></p>
+        </div>
+        <p class="flora-hint">Drag to turn · Arrows move through the list</p>
+        <div class="flora-nav">
+          <button id="specimen-prev" type="button" title="Previous plant">‹</button>
+          <button id="specimen-next" type="button" title="Next plant">›</button>
+        </div>
+      </div>
+      <div class="flora-rail">
+        <p class="eyebrow">Flora</p>
+        <h2>One of each</h2>
+        <ul id="flora-list"></ul>
+      </div>
+    </aside>
+    <button id="flora-toggle" class="flora-mark" type="button" aria-expanded="false" aria-controls="flora" title="Flora">
+      <span class="flora-dot"></span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 14V7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M8 8c0-3 2.2-4.5 4.5-4.5C12.2 6 10 7.2 8 8z" fill="currentColor"/>
+        <path d="M8 9.2C8 6.4 5.6 5 3.4 5 3.8 8 6 9 8 9.2z" fill="currentColor"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="spirit-dock">
+    <aside id="spirits" class="flora spirits" hidden>
+      <div class="flora-stage">
+        <canvas id="spirit-view" aria-label="The druid in one body"></canvas>
+        <div class="flora-caption">
+          <p class="eyebrow" id="spirit-group">Cloud</p>
+          <h2 id="spirit-name">Cloud boy</h2>
+          <p id="spirit-note"></p>
+          <p id="spirit-state" class="state"></p>
+        </div>
+        <p class="flora-hint">Drag to turn · Arrows wear the next body</p>
+        <div class="flora-nav">
+          <button id="spirit-prev" type="button" title="Previous body">‹</button>
+          <button id="spirit-next" type="button" title="Next body">›</button>
+        </div>
+      </div>
+      <div class="flora-rail">
+        <p class="eyebrow">Druid</p>
+        <h2>Seven bodies</h2>
+        <ul id="spirit-list"></ul>
+      </div>
+    </aside>
+    <button id="spirit-toggle" class="flora-mark spirit-mark" type="button" aria-expanded="false" aria-controls="spirits" title="Spirits">
+      <span class="flora-dot"></span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="6.2" cy="7.2" r="3.1" fill="currentColor" opacity="0.9"/>
+        <circle cx="10" cy="6.4" r="2.5" fill="currentColor" opacity="0.75"/>
+        <circle cx="8.2" cy="10" r="2.2" fill="currentColor" opacity="0.8"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="end" class="end" hidden>
+    <div class="card">
+      <p class="eyebrow">The idol went under</p>
+      <h1>Water climbed the pedestal</h1>
+      <p class="lede">The circle can drink. The figure on the pedestal cannot. Finish a stack by hand, or leave it through the rain, the leaves, and the snow.</p>
+      <dl>
+        <div><dt>Years</dt><dd id="end-years">1</dd></div>
+        <div><dt>Stacks</dt><dd id="end-stacks">0</dd></div>
+        <div><dt>Berms</dt><dd id="end-berms">0</dd></div>
+      </dl>
+      <button id="end-restart" type="button">Begin again</button>
+    </div>
+  </div>
+
+  <script src="../dist/ink-studio.browser.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

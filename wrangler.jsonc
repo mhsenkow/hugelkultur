@@ -1,0 +1,16 @@
+{
+  // Hugelkultur — the forest clearing. Deploy: npm run deploy → hugelkultur.ibm.io
+  "name": "hugelkultur",
+  "compatibility_date": "2026-11-20",
+  "assets": {
+    "directory": "./site"
+  },
+  "routes": [
+    { "pattern": "hugelkultur.ibm.io", "custom_domain": true }
+  ],
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": {
+    "enabled": true
+  }
+}
