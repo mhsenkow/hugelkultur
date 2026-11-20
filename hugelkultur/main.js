@@ -194,14 +194,18 @@ function paintHud() {
   seasonLabel.textContent = `${season.id} · Y${sim.year} · ${season.edge}`;
   const carry = sim.carrying ? 'stick' : sim.held || 'empty';
   const carryNames = { empty: 'nothing', stick: 'a stick', carrot: 'a carrot', turnip: 'a turnip', mushroom: 'a mushroom' };
-  const carryKey = carryLabel.querySelector(`svg[data-carry="${carry}"]`) ? carry : 'empty';
-  for (const icon of carryLabel.querySelectorAll('svg')) icon.hidden = icon.dataset.carry !== carryKey;
-  carryLabel.setAttribute('aria-label', carryNames[carryKey] || carry);
-  carryLabel.classList.toggle('holding', carryKey !== 'empty');
+  const carryKey = carryNames[carry] ? carry : 'empty';
+  for (const icon of carryLabel.querySelectorAll('svg')) {
+    const on = icon.dataset.carry === carryKey;
+    icon.classList.toggle('on', on);
+    icon.style.display = on ? 'block' : 'none';
+  }
+  carryLabel.setAttribute('aria-label', carryNames[carryKey]);
   const paceLabel = document.querySelector('#pace-label');
+  const paceRule = document.querySelector('#pace-rule');
   const quick = sim.haste > 0;
-  paceLabel.hidden = !quick;
-  document.querySelector('#pace-rule').hidden = !quick;
+  paceLabel.classList.toggle('on', quick);
+  paceRule.classList.toggle('on', quick);
   document.querySelector('#spirit-label').textContent = spiritById(sim.spiritId).name;
   paintFlora(false);
   paintSpirits(false);

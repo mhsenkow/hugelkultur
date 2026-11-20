@@ -47,9 +47,9 @@ canvas {
   pointer-events: none;
 }
 
-.cluster { max-width: min(440px, 70vw); }
+.cluster { max-width: min(760px, calc(100vw - 180px)); }
 
-.pill, .tools button, .card, #ticker {
+.pill, .tools button, .card {
   background: var(--glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -61,13 +61,15 @@ canvas {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  max-width: min(720px, calc(100vw - 200px));
+  padding: 7px 14px 7px 12px;
   border-radius: 999px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.02em;
   pointer-events: auto;
+  white-space: nowrap;
 }
 
 .pip {
@@ -84,37 +86,61 @@ canvas {
   background: var(--line);
 }
 
+#spirit-label { width: 10.4em; overflow: hidden; text-overflow: ellipsis; }
+#season-label { width: 8em; }
+#hearth-label { width: 8.4em; }
+#pace-label { width: 3.2em; visibility: hidden; }
+#pace-label.on { visibility: visible; }
+#pace-rule { visibility: hidden; }
+#pace-rule.on { visibility: visible; }
+
 #hearth-label.damp { color: #8a5a28; }
 #hearth-label.wet { color: var(--wet); }
-#carry-label.holding { color: #8a5a28; }
 
-#ticker {
-  display: inline-block;
-  max-width: 100%;
-  margin: 8px 0 0;
-  padding: 6px 12px;
-  border-radius: 999px;
-  color: #3e4a46;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 12px;
-  line-height: 1.35;
+.token-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.token-side::before {
+  content: "";
+  width: 1px;
+  height: 12px;
+  background: var(--line);
 }
 
 .carry {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-  align-items: center;
-  justify-content: center;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 .carry svg {
-  width: 16px;
-  height: 16px;
-  display: block;
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  display: none;
 }
 
-.carry svg[hidden] { display: none; }
+.carry svg.on { display: block; }
+
+#ticker {
+  width: 16.5em;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #3e4a46;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
 
 .foot {
   position: fixed;
