@@ -1,5 +1,5 @@
-import { cellCenter, cellAt } from './world.js';
-import { SPIRITS, spiritById } from './avatars.js';
+import { cellCenter, cellAt } from './world.js?v=square24';
+import { SPIRITS, spiritById } from './avatars.js?v=square24';
 
 export function createAvatar(B, KIT, sim) {
   const lane = cellCenter(8, 9).z;
@@ -63,6 +63,19 @@ export function wearSpirit(sim, id) {
   to.ph = 0;
   to.dead = -1;
   to.born = 0;
+  if (sim.resting === 'sleep') {
+    const bed = sim.restBeds?.[id];
+    if (bed) {
+      sim.bed = bed;
+      to.x = bed.x;
+      to.z = bed.z;
+      to.y = bed.elevation ?? to.y;
+      to.gh = to.y;
+    }
+    to.dead = 1.2;
+    to.vx = to.vy = to.vz = 0;
+    to.born = 2;
+  }
   parkSpirit(sim, sim.spiritId);
   sim.spiritId = next.id;
   sim.voice = spiritById(next.id).voice;

@@ -1,4 +1,6 @@
-import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth } from './world.js';
+import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=square24';
+import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear } from './clearing.js';
+import { settleMounds } from './growth.js?v=square24';
 
 export const SEASON_LENGTH = 52;
 
@@ -11,39 +13,70 @@ export const SEASONS = [
 
 const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
-// The stipple look keeps a pixel only when its luminance lands on the tide stop.
-// From the isometric camera the Fresnel sheen is thin, so the volume itself has to
-// be a bright pale cyan once the water is more than a film.
-const SUMMER_LOOK = {
-  tint: [0.32, 0.62, 0.96],
-  extinction: [16, 11, 6],
-  surfaceColor: [0.45, 0.72, 1],
-  surface: 0.72,
-  caustics: 0.12,
-  foam: 0.12,
-  depthRange: [1.2, 4]
-};
+const SEDIMENT = (color, strength) => ({ color, strength, height: 0.35, scale: 7 });
 
-const WINTER_LOOK = {
-  tint: [0.55, 0.75, 0.98],
-  extinction: [10, 8, 6],
-  surfaceColor: [0.7, 0.86, 1],
-  surface: 0.8,
-  caustics: 0.04,
-  foam: 0.08,
-  depthRange: [1.2, 4]
+const LOOKS = {
+  SPR: {
+    tint: [0.34, 0.66, 0.98],
+    extinction: [14, 10, 5],
+    surfaceColor: [0.52, 0.78, 1],
+    surface: 0.7,
+    caustics: 0.16,
+    foam: 0.1,
+    depthRange: [1.1, 3.8],
+    sediment: SEDIMENT([0.4, 0.62, 0.7], 0.04)
+  },
+  SUM: {
+    tint: [0.22, 0.48, 0.9],
+    extinction: [18, 12, 6],
+    surfaceColor: [0.32, 0.58, 0.98],
+    surface: 0.66,
+    caustics: 0.2,
+    foam: 0.08,
+    depthRange: [1.2, 4.2],
+    sediment: SEDIMENT([0.25, 0.45, 0.62], 0.02)
+  },
+  AUT: {
+    tint: [0.48, 0.42, 0.26],
+    extinction: [12, 10, 7],
+    surfaceColor: [0.68, 0.5, 0.28],
+    surface: 0.5,
+    caustics: 0.06,
+    foam: 0.14,
+    depthRange: [0.9, 3.2],
+    sediment: SEDIMENT([0.58, 0.38, 0.16], 0.48)
+  },
+  WIN: {
+    tint: [0.82, 0.9, 0.98],
+    extinction: [8, 8, 6],
+    surfaceColor: [0.92, 0.96, 1],
+    surface: 0.84,
+    caustics: 0.03,
+    foam: 0.06,
+    depthRange: [0.7, 2.6],
+    sediment: SEDIMENT([0.84, 0.9, 0.95], 0.32)
+  }
 };
 
 export function seasonOf(sim) {
   return SEASONS[sim.seasonIndex];
 }
 
+export function seasonLength(sim) {
+  return seasonOf(sim).id === 'SUM' ? 84 : SEASON_LENGTH;
+}
+
 function atMouth(cells, x, z, edge) {
   return isMouth(cellAt(cells, x, z), edge);
 }
 
+export function seasonOptics(season) {
+  const id = season?.id || season;
+  return LOOKS[id] || LOOKS.SUM;
+}
+
 function opticsFor(season) {
-  return season.id === 'WIN' ? WINTER_LOOK : SUMMER_LOOK;
+  return seasonOptics(season);
 }
 
 function terrainAt(sim, x, z) {
@@ -52,6 +85,7 @@ function terrainAt(sim, x, z) {
 }
 
 export function createWater(KIT, sim) {
+  if (!sim.live) sim.live = copyFingers();
   const solver = KIT.procedural.motion.shallowWater({
     width: GRID,
     height: GRID,
@@ -77,14 +111,139 @@ function publish(sim) {
   sim.world.water = waterBodies.scene([body]);
 }
 
+function rememberWater(sim) {
+  if (!sim.snapshot?.sample) return;
+  for (const cell of sim.cells) {
+    if (cell.hearth) continue;
+    const depth = sim.snapshot.sample(cell.x, cell.z)?.depth || 0;
+    if (depth > 0.04) cell.stain = Math.min(1, (cell.stain || 0) + 0.28);
+  }
+}
+
+function thickness(sim, i, k) {
+  const cell = sim.cells[k * GRID + i];
+  if (!cell) return 99;
+  let blocks = cell.sunk || 0;
+  if (Array.isArray(cell.block) && cell.block.length) {
+    for (const height of cell.block) blocks += height;
+  } else blocks += (cell.cubes || 0) * 0.74;
+  return (cell.berm ? 4 : 0) + (cell.layers || 0) + (cell.lift || 0) + (cell.coat || 0) + blocks * 4;
+}
+
+export function sidleGate(sim, season) {
+  const finger = sim.live?.find(item => item.bit === season.bit);
+  if (!finger) return false;
+  const [gi, gk] = finger.gate;
+  const [mi, mk] = finger.mouth;
+  let held = false;
+  for (const cell of sim.cells) {
+    if (Math.hypot(cell.i - gi, cell.k - gk) > 1.75) continue;
+    if (holdsWater(cell)) held = true;
+  }
+  if (!held) return false;
+  const dx = gi - mi;
+  const dz = gk - mk;
+  const len = Math.hypot(dx, dz) || 1;
+  const px = -dz / len;
+  const pz = dx / len;
+  let best = null;
+  let bestThick = 1e9;
+  for (const side of [-1, 1]) {
+    const i = Math.max(0, Math.min(GRID - 1, Math.round(gi + px * side * 1.5)));
+    const k = Math.max(0, Math.min(GRID - 1, Math.round(gk + pz * side * 1.5)));
+    const cell = sim.cells[k * GRID + i];
+    if (!cell || cell.hearth || cell.tree) continue;
+    const dist = Math.hypot(i - 8, k - 8);
+    if (dist < 2.1) continue;
+    const thick = thickness(sim, i, k);
+    if (thick < bestThick) {
+      bestThick = thick;
+      best = cell;
+    }
+  }
+  if (!best || (best.i === gi && best.k === gk)) return false;
+  const old = sim.cells[gk * GRID + gi];
+  if (old) old.stain = Math.min(1, (old.stain || 0) + 0.55);
+  finger.gate = [best.i, best.k];
+  best.sill = Math.min(best.sill || 0, 0) - 0.12;
+  best.channel = true;
+  sim.bedDirty = true;
+  if (best.lastWood) {
+    sim.chronicle.wood = best.lastWood;
+    sim.chronicle.edge = finger.edge;
+  } else if (old?.lastWood) {
+    sim.chronicle.wood = old.lastWood;
+    sim.chronicle.edge = finger.edge;
+  }
+  if (!sim.quiet) sim.events.push({ type: 'note', text: 'The water looks for another way.' });
+  return true;
+}
+
+export function markMouth(sim) {
+  if (!sim?.cells) return;
+  const season = seasonOf(sim);
+  const finger = sim.live?.find(item => item.bit === season.bit);
+  for (const cell of sim.cells) cell.mouth = false;
+  if (!finger) return;
+  const [mi, mk] = finger.mouth;
+  const [gi, gk] = finger.gate;
+  for (const cell of sim.cells) {
+    const mouth = Math.hypot(cell.i - mi, cell.k - mk) < 1.45;
+    const gate = Math.hypot(cell.i - gi, cell.k - gk) < 1.25;
+    if (!mouth && !gate) continue;
+    cell.mouth = true;
+    cell.stain = Math.min(1, Math.max(cell.stain || 0, gate ? 0.78 : 0.55));
+  }
+}
+
+function gateHeld(sim) {
+  const finger = sim.live?.find(item => item.bit === seasonOf(sim).bit);
+  if (!finger) return false;
+  return sim.cells.some(cell => Math.hypot(cell.i - finger.gate[0], cell.k - finger.gate[1]) <= 1.75 && holdsWater(cell));
+}
+
+export function waterLine(sim, stage) {
+  const season = seasonOf(sim);
+  const edge = EDGE_NAME[season.edge] || 'north';
+  const gate = `The ${edge} gate is ${gateHeld(sim) ? 'held' : 'open'}.`;
+  const name = SEASON_NAME[season.id] || 'The year';
+  if (stage === 'hem') return `${name} comes from the ${edge}. ${gate}`;
+  if (stage === 'drinks') return `The idol drinks. ${gate}`;
+  if (stage === 'under') return `The idol is under. ${gate}`;
+  return 'The idol is dry.';
+}
+
+export function closeSeason(sim) {
+  const finished = seasonOf(sim);
+  rememberWater(sim);
+  if ((sim.flood || 0) < 1) sidleGate(sim, finished);
+  sim.seasonTime = 0;
+  sim.seasonIndex = (sim.seasonIndex + 1) % SEASONS.length;
+  const rolled = sim.seasonIndex === 0;
+  if (rolled) {
+    sim.chronicle.berms = sim.berms || 0;
+    sim.yearLine = yearTitle(sim.chronicle);
+    noteYear(sim);
+    if (!sim.quiet) sim.events.push({ type: 'year', text: sim.yearLine });
+    sim.year += 1;
+    sim.chronicle = freshChronicle();
+    revealGlade(sim);
+  }
+  if (!sim.quiet) sim.events.push({ type: 'season', text: seasonOf(sim).line });
+  if (rolled) settleMounds(sim);
+  markMouth(sim);
+  return finished;
+}
+
 export function updateWater(sim, dt) {
   if (sim.over) return;
   sim.seasonTime += dt;
-  if (sim.seasonTime >= SEASON_LENGTH) {
-    sim.seasonTime = 0;
-    sim.seasonIndex = (sim.seasonIndex + 1) % SEASONS.length;
-    if (sim.seasonIndex === 0) sim.year += 1;
-    sim.events.push({ type: 'season', text: seasonOf(sim).line });
+  let turned = 0;
+  while (sim.seasonTime >= seasonLength(sim) && turned < 8 && !sim.over) {
+    const extra = sim.seasonTime - seasonLength(sim);
+    closeSeason(sim);
+    sim.seasonTime = extra;
+    turned += 1;
   }
   if (sim.bedDirty) {
     sim.solver.setTerrain((x, z) => terrainAt(sim, x, z));
@@ -92,11 +251,18 @@ export function updateWater(sim, dt) {
   }
   const current = seasonOf(sim);
   const leave = OPPOSITE[current.edge];
+  const press = pressureOf(sim.year, sim.measures?.climb);
+  const ease = 1 / (1 + Math.max(0, sim.year - 1) * Math.min(0.18, sim.measures?.climb ?? 0.22));
   sim.solver.step(dt, {
     friction: current.friction,
-    rain: (x, z) => (atMouth(sim.cells, x, z, current.edge) ? current.inflow : 0),
+    rain: (x, z) => {
+      let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press) : 0;
+      const cell = cellAt(sim.cells, x, z);
+      if (cell?.thaw) rate += Math.min(0.02, cell.thaw);
+      return rate;
+    },
     drain: (x, z, _t, state) => {
-      let rate = current.drain;
+      let rate = current.drain * ease;
       if (atMouth(sim.cells, x, z, leave)) rate += 0.04;
       if (state.depth < 0.02) rate += 0.012;
       return rate;
@@ -105,10 +271,22 @@ export function updateWater(sim, dt) {
   publish(sim);
 
   const depth = idolDepth(sim);
-  if (depth > 0.035) sim.flood += dt;
-  else sim.flood = Math.max(0, sim.flood - dt * 0.45);
-  if (sim.flood >= 6) {
+  const stage = idolStage(depth);
+  if (stage === 'drinks') sim.flood += dt * 0.05;
+  else if (stage === 'under') sim.flood += dt * 0.2;
+  else if (stage === 'hem') sim.flood = Math.max(0, sim.flood - dt * 0.04);
+  else sim.flood = Math.max(0, sim.flood - dt * 0.28);
+  if (sim.stageSaid !== stage) {
+    const prev = sim.stageSaid;
+    sim.stageSaid = stage;
+    const rank = { dry: 0, hem: 1, drinks: 2, under: 3 };
+    const worse = (rank[stage] || 0) > (rank[prev] || 0);
+    const recovered = stage === 'dry' && (rank[prev] || 0) >= 2;
+    if (prev && !sim.quiet && (worse || recovered)) sim.events.push({ type: 'flood', text: waterLine(sim, stage) });
+  }
+  if (sim.flood >= 9) {
     sim.over = true;
+    sim.chronicle.drank = true;
     sim.events.push({ type: 'flood', text: 'The idol is wet.' });
   }
 }

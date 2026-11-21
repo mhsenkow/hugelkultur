@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Hugelkultur</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=night2">
 </head>
 <body>
   <canvas id="view" aria-label="Isometric forest clearing"></canvas>
+  <div id="night" aria-hidden="true"></div>
 
   <header class="hud">
     <div class="cluster">
@@ -31,8 +32,20 @@
           <span id="pace-label">quick</span>
         </span>
       </div>
+      <aside id="measures" class="measures" aria-label="Measures">
+        <p id="fit-line">Spring fits him.</p>
+        <div id="measure-line"></div>
+        <p id="run-line">Keep the idol dry.</p>
+        <button id="god-toggle" type="button" aria-pressed="false">Bend</button>
+        <div id="god-panel" hidden></div>
+      </aside>
     </div>
     <div class="tools">
+      <div class="sizes" role="group" aria-label="Grid">
+        <button class="size" type="button" data-grid="16" title="16 by 16">16</button>
+        <button class="size" type="button" data-grid="32" title="32 by 32">32</button>
+        <button class="size" type="button" data-grid="64" title="64 by 64">64</button>
+      </div>
       <button id="turn-left" type="button" title="Square the view left">↺</button>
       <button id="turn-right" type="button" title="Square the view right">↻</button>
       <button id="sound" type="button" title="Sound" aria-pressed="true">♪</button>
@@ -55,7 +68,7 @@
     <label>
       <span>Pixels</span>
       <output id="look-pixels-out">3</output>
-      <input id="look-pixels" type="range" min="1" max="6" step="1" value="3">
+      <input id="look-pixels" type="range" min="1" max="12" step="1" value="3">
     </label>
     <label>
       <span>Dots</span>
@@ -72,6 +85,12 @@
       <output id="look-grain-out">45</output>
       <input id="look-grain" type="range" min="0" max="100" step="1" value="45">
     </label>
+    <label>
+      <span>Fidelity</span>
+      <output id="look-fidelity-out">1×</output>
+      <input id="look-fidelity" type="range" min="1" max="4" step="1" value="1">
+    </label>
+    <p class="look-note">Letting go rebuilds this forest. Trees and the ground use more spheres.</p>
     <div class="look-patterns" role="group" aria-label="Dot pattern">
       <button type="button" data-pattern="bayer" aria-pressed="true">Grid</button>
       <button type="button" data-pattern="blue-noise" aria-pressed="false">Scatter</button>
@@ -87,10 +106,13 @@
         <div class="flora-caption">
           <p class="eyebrow" id="specimen-group">Tree</p>
           <h2 id="specimen-name">White oak</h2>
+          <div id="specimen-tabs" class="study-tabs" role="tablist" aria-label="Looks" hidden></div>
+          <p id="specimen-study" class="study-line"></p>
           <p id="specimen-note"></p>
           <p id="specimen-state" class="state"></p>
+          <button id="sow" type="button" hidden>Plant this</button>
         </div>
-        <p class="flora-hint">Drag to turn · Arrows move through the list</p>
+        <p class="flora-hint">Drag to turn · Arrows change the plant · [ ] tries a look</p>
         <div class="flora-nav">
           <button id="specimen-prev" type="button" title="Previous plant">‹</button>
           <button id="specimen-next" type="button" title="Next plant">›</button>
@@ -144,25 +166,30 @@
     </button>
   </div>
 
-  <footer class="foot">
-    <p class="hint">Click her, the idol, or a crop · Drag turns, right-drag slides · Scroll toward the pointer · Double-click the ground comes home</p>
+  <footer class="foot" id="hint-bar">
+    <p class="hint">Click where she should work. Arrows take her steps. 1–7 wears a body. At night she sleeps, and morning sets her home.</p>
+    <button id="hint-close" type="button" aria-label="Close">×</button>
   </footer>
 
   <div id="end" class="end" hidden>
     <div class="card">
       <p class="eyebrow">The idol went under</p>
       <h1>Water climbed the pedestal</h1>
-      <p class="lede">The circle can drink. The figure on the pedestal cannot. Finish a stack by hand, or leave it through the rain, the leaves, and the snow.</p>
+      <p class="lede" id="end-line">The land stays. Keep the idol dry.</p>
+      <ol id="end-lines"></ol>
       <dl>
         <div><dt>Years</dt><dd id="end-years">1</dd></div>
-        <div><dt>Stacks</dt><dd id="end-stacks">0</dd></div>
-        <div><dt>Berms</dt><dd id="end-berms">0</dd></div>
+        <div><dt>Cubes</dt><dd id="end-cubes">0</dd></div>
+        <div><dt>Gates</dt><dd id="end-gates">0</dd></div>
       </dl>
-      <button id="end-restart" type="button">Begin again</button>
+      <div class="card-actions">
+        <button id="end-same" class="quiet" type="button">Same wood</button>
+        <button id="end-restart" type="button">Begin again</button>
+      </div>
     </div>
   </div>
 
   <script src="../dist/ink-studio.browser.js"></script>
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./main.js?v=square24"></script>
 </body>
 </html>

@@ -1,16 +1,23 @@
 import { createRenderer } from '../webgl.mjs';
-import { buildWorld, PEDESTAL } from './world.js';
-import { createAvatar, movement, wearSpirit } from './avatar.js';
-import { SPIRITS, spiritById, buildSpirit } from './avatars.js';
-import { createStickSystem, updateSticks, stackCount } from './sticks.js';
-import { updateGrowth, drawGrowth } from './growth.js';
-import { updateGardens } from './gardens.js';
+import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=square24';
+import { createAvatar, movement, wearSpirit } from './avatar.js?v=square24';
+import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=square24';
+import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=square24';
+import { updateGrowth, drawGrowth, moundLine, seedSquirrels, shooSquirrel } from './growth.js?v=square24';
+import { updateGardens } from './gardens.js?v=age3';
 import { updateMotions, MOTIONS } from './motions.js';
-import { updateWeather } from './weather.js';
-import { createWater, updateWater, seasonOf, SEASON_LENGTH, clearingDepth } from './water.js';
-import { steer } from './guide.js';
-import { FLORA, floraById } from './species.js';
-import { buildSpecimen, buildMotion } from './specimens.js';
+import { updateWeather } from './weather.js?v=square24';
+import { updateDay, nightAmount, dayPart } from './day.js?v=square24';
+import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=square24';
+import { steer } from './guide.js?v=square24';
+import {
+  wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS,
+  loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
+  EDGE_NAME, compassName, liftCap, buried
+} from './clearing.js';
+import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=square24';
+import { FLORA, floraById } from './species.js?v=square24';
+import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=square24';
 
 const canvas = document.querySelector('#view');
 const seasonLabel = document.querySelector('#season-label');
@@ -27,14 +34,16 @@ let sim = null;
 let renderer = null;
 const ISO_YAW = Math.PI / 4;
 const ISO_PITCH = 0.72;
-const ISO_DIST = 26;
+function homeDist() {
+  return 26 * (GRID / 16);
+}
 const ISO_FOV = 0.66;
 const GOAL = { x: 0.2, y: 0.9, z: 0.2 };
 
 let yaw = ISO_YAW;
 let pitch = ISO_PITCH;
-let dist = ISO_DIST;
-let distTo = ISO_DIST;
+let dist = 26;
+let distTo = 26;
 const look = { x: GOAL.x, y: GOAL.y, z: GOAL.z };
 const gaze = { x: GOAL.x, y: GOAL.y, z: GOAL.z };
 let focus = null;
@@ -47,6 +56,9 @@ const fingers = new Map();
 let first = true;
 let last = 0;
 let specimenId = 'oak';
+let specimenTake = 'simple';
+let specimenBroken = '';
+const specimenTakes = new Map();
 let specimenYaw = Math.PI / 4;
 let specimenDrag = null;
 let specimenView = null;
@@ -59,7 +71,12 @@ let spiritRenderer = null;
 const spiritViews = new Map();
 
 const LOOK_KEY = 'hugelkultur-look';
-const LOOK = { pixels: 3, dots: 0.62, ink: 0.05, grain: 0.45, pattern: 'bayer' };
+const SCENE_KEY = 'hugelkultur-scene';
+const HINT_KEY = 'hugelkultur-hint';
+const LOOK = { pixels: 3, dots: 0.62, ink: 0.05, grain: 0.45, pattern: 'bayer', fidelity: 1, hand: false };
+let forestSeed = 1;
+let god = false;
+let bakedFidelity = 1;
 
 function clampLook(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
@@ -69,11 +86,13 @@ function loadLook() {
   try {
     const raw = JSON.parse(localStorage.getItem(LOOK_KEY) || 'null');
     if (!raw || typeof raw !== 'object') return;
-    if (Number.isFinite(raw.pixels)) LOOK.pixels = clampLook(Math.round(raw.pixels), 1, 6);
+    if (Number.isFinite(raw.pixels)) LOOK.pixels = clampLook(Math.round(raw.pixels), 1, 12);
     if (Number.isFinite(raw.dots)) LOOK.dots = clampLook(raw.dots, 0, 1);
     if (Number.isFinite(raw.ink)) LOOK.ink = clampLook(raw.ink, 0, 0.4);
     if (Number.isFinite(raw.grain)) LOOK.grain = clampLook(raw.grain, 0, 1);
     if (raw.pattern === 'bayer' || raw.pattern === 'blue-noise') LOOK.pattern = raw.pattern;
+    if (Number.isFinite(raw.fidelity)) LOOK.fidelity = clampLook(Math.round(raw.fidelity), 1, 4);
+    LOOK.hand = true;
   } catch {
     /* keep the original look */
   }
@@ -87,34 +106,52 @@ function saveLook() {
   }
 }
 
+function shownLook() {
+  if (LOOK.hand || !sim) return LOOK;
+  const want = SEASON_LOOK[seasonOf(sim).id];
+  if (!want) return LOOK;
+  return { ...LOOK, dots: want.dots, ink: want.ink, grain: want.grain, pattern: want.pattern };
+}
+
 function applyLook() {
+  const look = shownLook();
   const tone = sim?.world?.look?.tone;
   if (tone) {
-    tone.amount = LOOK.dots;
-    tone.cutoff = LOOK.ink;
-    tone.pattern = LOOK.pattern;
+    tone.amount = look.dots;
+    tone.cutoff = look.ink;
+    tone.pattern = look.pattern;
   }
   const worlds = [sim?.world, specimenView?.world, spiritView?.world];
   for (const view of spiritViews.values()) worlds.push(view?.world);
-  for (const world of worlds) if (world) world.dither = LOOK.grain;
+  for (const world of worlds) if (world) world.dither = look.grain;
+  if (sim?.shafts) {
+    const id = seasonOf(sim).id;
+    const base = id === 'SUM' ? 0.48 : id === 'SPR' ? 0.16 : id === 'AUT' ? 0.08 : 0.07;
+    const beams = Math.max(1, sim.glade?.gaps?.length || 4);
+    sim.shafts.k = GRID >= 32 ? 0 : base * Math.sqrt(4 / beams);
+  }
 }
 
 function paintLook() {
+  const look = shownLook();
   document.querySelector('#look-pixels').value = String(LOOK.pixels);
-  document.querySelector('#look-dots').value = String(Math.round(LOOK.dots * 100));
-  document.querySelector('#look-ink').value = String(Math.round(LOOK.ink * 100));
-  document.querySelector('#look-grain').value = String(Math.round(LOOK.grain * 100));
+  document.querySelector('#look-dots').value = String(Math.round(look.dots * 100));
+  document.querySelector('#look-ink').value = String(Math.round(look.ink * 100));
+  document.querySelector('#look-grain').value = String(Math.round(look.grain * 100));
   document.querySelector('#look-pixels-out').textContent = `${LOOK.pixels}×`;
-  document.querySelector('#look-dots-out').textContent = String(Math.round(LOOK.dots * 100));
-  document.querySelector('#look-ink-out').textContent = String(Math.round(LOOK.ink * 100));
-  document.querySelector('#look-grain-out').textContent = String(Math.round(LOOK.grain * 100));
+  document.querySelector('#look-dots-out').textContent = String(Math.round(look.dots * 100));
+  document.querySelector('#look-ink-out').textContent = String(Math.round(look.ink * 100));
+  document.querySelector('#look-grain-out').textContent = String(Math.round(look.grain * 100));
+  document.querySelector('#look-fidelity').value = String(LOOK.fidelity);
+  document.querySelector('#look-fidelity-out').textContent = `${LOOK.fidelity}×`;
   for (const button of document.querySelectorAll('#look-panel [data-pattern]')) {
-    button.setAttribute('aria-pressed', String(button.dataset.pattern === LOOK.pattern));
+    button.setAttribute('aria-pressed', String(button.dataset.pattern === look.pattern));
   }
 }
 
 function readLook() {
-  LOOK.pixels = clampLook(Number(document.querySelector('#look-pixels').value), 1, 6);
+  LOOK.hand = true;
+  LOOK.pixels = clampLook(Number(document.querySelector('#look-pixels').value), 1, 12);
   LOOK.dots = clampLook(Number(document.querySelector('#look-dots').value) / 100, 0, 1);
   LOOK.ink = clampLook(Number(document.querySelector('#look-ink').value) / 100, 0, 0.4);
   LOOK.grain = clampLook(Number(document.querySelector('#look-grain').value) / 100, 0, 1);
@@ -124,17 +161,58 @@ function readLook() {
   document.querySelector('#look-dots-out').textContent = String(Math.round(LOOK.dots * 100));
   document.querySelector('#look-ink-out').textContent = String(Math.round(LOOK.ink * 100));
   document.querySelector('#look-grain-out').textContent = String(Math.round(LOOK.grain * 100));
+  document.querySelector('#look-fidelity-out').textContent = `${document.querySelector('#look-fidelity').value}×`;
 }
 
 function resetLook() {
+  const rebake = LOOK.fidelity !== 1;
   LOOK.pixels = 3;
   LOOK.dots = 0.62;
   LOOK.ink = 0.05;
   LOOK.grain = 0.45;
   LOOK.pattern = 'bayer';
+  LOOK.fidelity = 1;
+  LOOK.hand = false;
+  if (rebake) {
+    saveLook();
+    location.reload();
+    return;
+  }
   applyLook();
   try { localStorage.removeItem(LOOK_KEY); } catch { /* the original is already on screen */ }
   paintLook();
+}
+
+function sceneSeed() {
+  try {
+    if (sessionStorage.getItem('hugelkultur-fresh') !== '1') {
+      const kept = readForest();
+      if (kept?.seed) {
+        sessionStorage.setItem(SCENE_KEY, String(kept.seed));
+        return kept.seed >>> 0;
+      }
+    }
+    const saved = Number(sessionStorage.getItem(SCENE_KEY));
+    if (Number.isFinite(saved) && saved > 0) return saved >>> 0;
+  } catch { /* a fresh forest is fine */ }
+  const seed = (Math.random() * 0xffffffff) >>> 0 || 1;
+  try { sessionStorage.setItem(SCENE_KEY, String(seed)); } catch { /* this visit still keeps the seed in memory */ }
+  return seed;
+}
+
+function beginAgain() {
+  try {
+    sessionStorage.setItem('hugelkultur-fresh', '1');
+    sessionStorage.removeItem(SCENE_KEY);
+  } catch { /* reload still starts something */ }
+  clearForest();
+  location.reload();
+}
+
+function sameWood() {
+  try { sessionStorage.setItem('hugelkultur-fresh', '1'); } catch { /* the seed can stay */ }
+  clearForest();
+  location.reload();
 }
 
 function artSize() {
@@ -158,11 +236,18 @@ function tone(type) {
   const now = audioCtx.currentTime;
   const notes = {
     place: [220, 140, 0.07, 'triangle'],
+    maple: [240, 150, 0.07, 'triangle'],
+    oak: [130, 78, 0.12, 'triangle'],
+    birch: [620, 410, 0.06, 'sine'],
+    willow: [280, 170, 0.1, 'triangle'],
+    alder: [168, 112, 0.1, 'sine'],
     take: [330, 220, 0.06, 'sine'],
     shake: [180, 320, 0.09, 'triangle'],
-    berm: [523, 659, 0.28, 'sine'],
-    flood: [180, 90, 0.22, 'sawtooth'],
-    eat: [440, 660, 0.12, 'sine']
+    berm: [196, 98, 0.32, 'sine'],
+    flood: [166, 117, 0.36, 'sawtooth'],
+    eat: [440, 660, 0.12, 'sine'],
+    plant: [392, 523, 0.16, 'sine'],
+    year: [262, 392, 0.28, 'sine']
   };
   const [a, b, dur, kind] = notes[type] || notes.place;
   osc.type = kind;
@@ -172,6 +257,18 @@ function tone(type) {
   gain.gain.linearRampToValueAtTime(0.001, now + dur);
   osc.start(now);
   osc.stop(now + dur + 0.02);
+  if (type === 'flood') {
+    const clash = audioCtx.createOscillator();
+    const clashGain = audioCtx.createGain();
+    clash.connect(clashGain);
+    clashGain.connect(audioCtx.destination);
+    clash.type = 'sawtooth';
+    clash.frequency.setValueAtTime(233, now);
+    clashGain.gain.setValueAtTime(0.04, now);
+    clashGain.gain.linearRampToValueAtTime(0.001, now + dur);
+    clash.start(now);
+    clash.stop(now + dur + 0.02);
+  }
 }
 
 function say(text) {
@@ -179,11 +276,26 @@ function say(text) {
 }
 
 function drainEvents() {
+  let line = null;
+  let answer = null;
+  const voiced = new Set(['year', 'season', 'flood', 'stone', 'fall', 'rot', 'plant', 'sow', 'fern', 'glade', 'nut', 'squirrel', 'ground', 'circle', 'eat']);
   for (const event of sim.events) {
-    if (event.text) say(event.text);
-    if (event.type === 'place' || event.type === 'take' || event.type === 'shake' || event.type === 'berm' || event.type === 'flood' || event.type === 'eat') {
-      tone(event.type);
+    const kept = !sim.fast || voiced.has(event.type);
+    if (event.text && kept) {
+      if (event.type === 'plant' || event.type === 'sow') answer = event.text;
+      else if (!sim.sow) line = event.text;
     }
+    const musical = ['place', 'take', 'shake', 'berm', 'flood', 'eat', 'plant', 'year', 'oak', 'birch', 'willow', 'alder', 'maple'].includes(event.type);
+    if (musical && (!sim.fast || event.type === 'year' || event.type === 'flood')) tone(event.type);
+    if (event.type === 'season' && !LOOK.hand) paintLook();
+  }
+  const linger = 2.2 * Math.max(1, sim.speed || 1);
+  if (answer) {
+    say(answer);
+    sim.holdLine = sim.time + linger;
+  } else if (line && !(sim.holdLine > sim.time)) {
+    say(line);
+    if (sim.fast) sim.holdLine = sim.time + linger;
   }
   sim.events.length = 0;
 }
@@ -191,7 +303,11 @@ function drainEvents() {
 function paintHud() {
   const season = seasonOf(sim);
   seasonPip.style.background = season.pip;
-  seasonLabel.textContent = `${season.id} · Y${sim.year} · ${season.edge}`;
+  seasonLabel.textContent = `${season.id} · Y${sim.year} · ${season.edge} · ${dayPart(sim.time)}`;
+  const veil = document.querySelector('#night');
+  const dark = nightAmount(sim.time);
+  if (veil) veil.style.opacity = (dark * 0.85).toFixed(3);
+  document.body.classList.toggle('night', dark > 0.45);
   const carry = sim.carrying ? 'stick' : sim.held || 'empty';
   const carryNames = { empty: 'nothing', stick: 'a stick', carrot: 'a carrot', turnip: 'a turnip', mushroom: 'a mushroom' };
   const carryKey = carryNames[carry] ? carry : 'empty';
@@ -209,15 +325,37 @@ function paintHud() {
   document.querySelector('#spirit-label').textContent = spiritById(sim.spiritId).name;
   paintFlora(false);
   paintSpirits(false);
-  const wet = sim.flood > 0.35;
-  const damp = !wet && clearingDepth(sim) > 0.045;
-  hearthLabel.textContent = wet ? 'idol wet' : damp ? 'clearing wet' : 'idol dry';
-  hearthLabel.classList.toggle('wet', wet);
-  hearthLabel.classList.toggle('damp', damp);
+  const stage = sim.over ? 'under' : idolStage(idolDepth(sim));
+  const damp = stage === 'dry' && clearingDepth(sim) > 0.045;
+  hearthLabel.textContent = idolLabel(stage);
+  hearthLabel.title = damp ? 'Water is in the ring.' : '';
+  hearthLabel.classList.toggle('wet', stage === 'drinks' || stage === 'under');
+  hearthLabel.classList.toggle('damp', stage === 'hem' || damp);
+  if (sim.carrying) {
+    const label = woodOf(sim.carryKind).label;
+    carryLabel.title = label;
+    carryLabel.setAttribute('aria-label', `a ${label} stick`);
+  } else carryLabel.title = '';
+  paintMeasures();
   if (!sim.over) return;
+  const endLine = document.querySelector('#end-line');
+  if (endLine) endLine.textContent = 'The land stays. Keep the idol dry.';
+  const lines = sim.years?.length ? sim.years : (sim.yearLine ? [sim.yearLine] : []);
   document.querySelector('#end-years').textContent = String(sim.year);
-  document.querySelector('#end-stacks').textContent = String(stackCount(sim));
-  document.querySelector('#end-berms').textContent = String(sim.berms);
+  const cubes = sim.cells.reduce((sum, cell) => sum + (cell.cubes || 0), 0);
+  const cubeNode = document.querySelector('#end-cubes');
+  const gateNode = document.querySelector('#end-gates');
+  if (cubeNode) cubeNode.textContent = String(cubes);
+  const gates = Number.isFinite(sim.gates) ? sim.gates : lines.filter(line => line.includes('gate')).length;
+  if (gateNode) gateNode.textContent = String(gates);
+  const list = document.querySelector('#end-lines');
+  if (list && list.childElementCount !== Math.min(8, lines.length)) {
+    list.replaceChildren(...lines.slice(-8).map(text => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      return item;
+    }));
+  }
   end.hidden = false;
 }
 
@@ -305,7 +443,44 @@ function pick(clientX, clientY) {
   for (const plot of sim.plots) {
     consider('crop', plot.id, [plot.x, plot.cell.elevation + 0.36, plot.z], 0.48);
   }
+  for (const cell of sim.cells) {
+    if (!cell.berm && !cell.cubes) continue;
+    consider('mound', `${cell.i},${cell.k}`, [cell.x, walkHeight(cell), cell.z], 0.46);
+  }
+  sim.loose.forEach((stick, index) => {
+    if (stick.fall) return;
+    const cell = cellAt(sim.cells, stick.x, stick.z);
+    const y = (cell ? walkHeight(cell) : 0.4) + 0.1;
+    consider('stick', String(index), [stick.x, y, stick.z], 0.32);
+  });
   return best;
+}
+
+function pickGround(clientX, clientY) {
+  const rays = cameraRays();
+  const { rect, right, up, back, viewWidth, viewHeight } = rays;
+  const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
+  const setback = 80;
+  const origin = [
+    look.x + back[0] * setback + right[0] * ndcX * viewWidth + up[0] * ndcY * viewHeight,
+    look.y + back[1] * setback + right[1] * ndcX * viewWidth + up[1] * ndcY * viewHeight,
+    look.z + back[2] * setback + right[2] * ndcX * viewWidth + up[2] * ndcY * viewHeight
+  ];
+  const dir = [-back[0], -back[1], -back[2]];
+  if (Math.abs(dir[1]) < 1e-4) return null;
+  const t = (0.9 - origin[1]) / dir[1];
+  if (t < 0) return null;
+  return cellAt(sim.cells, origin[0] + dir[0] * t, origin[2] + dir[2] * t);
+}
+
+function gazeOf(subject) {
+  if (!subject) return null;
+  if (subject.kind === 'her') return cellAt(sim.cells, sim.character.st.x, sim.character.st.z);
+  if (subject.kind === 'idol') return sim.hearth;
+  if (subject.kind === 'mound') return sim.cells.find(cell => `${cell.i},${cell.k}` === subject.id) || null;
+  if (subject.kind === 'crop') return sim.plots.find(item => item.id === subject.id)?.cell || null;
+  return null;
 }
 
 function anchorOf(kind, id) {
@@ -316,6 +491,11 @@ function anchorOf(kind, id) {
   if (kind === 'idol') {
     const hearth = sim.hearth;
     return [hearth.x, hearth.elevation + PEDESTAL + 0.55, hearth.z];
+  }
+  if (kind === 'mound') {
+    const cell = sim.cells.find(item => `${item.i},${item.k}` === id);
+    if (!cell) return null;
+    return [cell.x, cell.elevation + 0.55, cell.z];
   }
   const plot = sim.plots.find(item => item.id === id);
   if (!plot) return null;
@@ -330,11 +510,13 @@ function subjectPoint() {
 function frameDist(kind) {
   if (kind === 'her') return 6.4;
   if (kind === 'idol') return 8;
+  if (kind === 'mound') return 5.4;
   return 4.8;
 }
 
 function clampDist(value) {
-  return Math.min(40, Math.max(0.36, value));
+  const far = Math.max(40, homeDist() * 1.15);
+  return Math.min(far, Math.max(0.36, value));
 }
 
 function rememberAnchor() {
@@ -352,10 +534,59 @@ function placeGaze(hit) {
   rememberAnchor();
 }
 
+function cannotWork(cell) {
+  if (!cell) return 'The cube ends.';
+  if (cell.hearth) return 'The idol is there.';
+  if (cell.plot) return 'That is a bed.';
+  if (cell.log) return 'A trunk lies there.';
+  if (cell.rock) return 'The stone is set.';
+  if (cell.tree && !cell.berm) return 'A tree stands there.';
+  if (buried(cell)) return 'Snow covers the stick.';
+  if (cell.berm && (cell.lift || 0) >= liftCap(sim.year)) return 'The mound is tall.';
+  if (!cell.berm && (cell.layers || 0) >= 5) return 'The stack is full.';
+  return '';
+}
+
+function sendHer(cell) {
+  if (!cell || !sim) return;
+  shooSquirrel(sim, cell);
+  const why = cannotWork(cell);
+  if (why) {
+    say(why);
+    sim.errand = null;
+    return;
+  }
+  sim.errand = { i: cell.i, k: cell.k, until: sim.time + 24 };
+  sim.wantStick = null;
+  const watch = `You watch the ${compassName(cell.i, cell.k, sim.hearth?.i ?? 8, sim.hearth?.k ?? 8)}.`;
+  const story = cell.story?.length ? moundLine(cell) : '';
+  say(story ? `${watch} ${story}` : watch);
+}
+
 function focusSubject(hit, frame) {
+  if (hit.kind === 'stick') {
+    const index = Number(hit.id);
+    const stick = sim.loose[index];
+    if (!stick) return;
+    sim.wantStick = index;
+    sim.errand = null;
+    say(`You want the ${woodOf(stick.kind || 'maple').label} stick.`);
+    return;
+  }
   const same = focus && focus.kind === hit.kind && focus.id === hit.id;
   if (same && !frame) return;
   focus = { kind: hit.kind, id: hit.id };
+  if (hit.kind === 'mound') {
+    const cell = sim.cells.find(item => `${item.i},${item.k}` === hit.id);
+    if (cell) sendHer(cell);
+  } else if (hit.kind === 'crop') {
+    const plot = sim.plots.find(item => item.id === hit.id);
+    if (plot?.growth >= 1) {
+      say('You watch the bed.');
+      sim.guide.goal = { kind: 'eat', id: plot.id, x: plot.x, z: plot.z };
+    } else say('The bed is not ready.');
+  } else if (hit.kind === 'idol') say('You watch the idol.');
+  else if (hit.kind === 'her') say('You watch her.');
   placeGaze(hit);
   const readable = frameDist(hit.kind);
   if (frame || dist > 12 || dist < readable * 0.48) distTo = readable;
@@ -367,10 +598,8 @@ function releaseFocus() {
   gaze.x = GOAL.x;
   gaze.y = GOAL.y;
   gaze.z = GOAL.z;
-  distTo = ISO_DIST;
-  const step = Math.PI / 2;
-  const n = Math.round((yaw - ISO_YAW) / step);
-  settle = { yaw: ISO_YAW + n * step, pitch: ISO_PITCH };
+  distTo = homeDist();
+  settle = { yaw: MOUTH_YAW[seasonOf(sim).edge] ?? ISO_YAW, pitch: ISO_PITCH };
   rememberAnchor();
 }
 
@@ -426,7 +655,8 @@ function softenPitch(next) {
 function paintCursor() {
   canvas.classList.toggle('looking', Boolean(orbit && orbit.mode === 'orbit' && orbit.moved));
   canvas.classList.toggle('sliding', Boolean(orbit && orbit.mode === 'pan' && orbit.moved));
-  canvas.classList.toggle('hot', !orbit && !pinch && hovering);
+  canvas.classList.toggle('hot', !orbit && !pinch && hovering && !sim?.sow);
+  canvas.classList.toggle('sowing', Boolean(sim?.sow) && !orbit && !pinch);
 }
 
 function aim(dt) {
@@ -436,7 +666,7 @@ function aim(dt) {
     gaze.x = GOAL.x;
     gaze.y = GOAL.y;
     gaze.z = GOAL.z;
-    distTo = ISO_DIST;
+    distTo = homeDist();
     goal = [GOAL.x, GOAL.y, GOAL.z];
   }
   if (anchor) {
@@ -451,7 +681,7 @@ function aim(dt) {
     look.z += dz;
   }
   anchor = goal.slice();
-  const zoomingOut = distTo > dist + 0.04 || dist > ISO_DIST + 2;
+  const zoomingOut = distTo > dist + 0.04 || dist > homeDist() + 2;
   if (!orbit && !pinch && !focus && zoomingOut) {
     const pull = (1 - Math.exp(-dt * 2.2)) * Math.min(1, Math.max(0, dist - 16) / 12);
     gaze.x += (GOAL.x - gaze.x) * pull;
@@ -479,23 +709,68 @@ function aim(dt) {
 
 function frame(now) {
   applyLook();
+  if (sim) sim.viewYaw = yaw;
   const dt = Math.min(0.05, last ? (now - last) / 1000 : 1 / 60);
   last = now;
   aim(dt);
+  let step = dt;
+  if (focus) {
+    sim.attention = (sim.attention || 0) + dt;
+    sim.gazeCell = gazeOf(focus);
+    if (sim.attention > 0.55) {
+      if (!sim.watched) {
+        sim.watched = true;
+        sim.events.push({ type: 'note', text: 'You watched.' });
+      }
+      step *= 0.64;
+    }
+  } else {
+    sim.attention = 0;
+    sim.watched = false;
+    sim.gazeCell = null;
+  }
+  const rate = Math.min(100, Math.max(1, sim.speed || 1));
+  sim.fast = rate >= 8;
+  const driving = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].some(code => keys.has(code));
+  if (driving && !sim.walking) {
+    sim.walking = true;
+    sim.events.push({ type: 'note', text: 'You walk.' });
+  } else if (!driving && sim.walking) {
+    sim.walking = false;
+    sim.events.push({ type: 'note', text: 'She goes on.' });
+  }
   if (!sim.over) {
-    const driving = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].some(code => keys.has(code));
-    const auto = steer(sim, dt, driving);
-    const input = driving ? movement(keys, yaw) : (auto || { move: 0, mz: 0 });
-    const paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : input;
-    sim.character.update(dt, paced, sim.time);
-    updateSticks(sim, dt);
-    updateGrowth(sim, dt);
-    updateGardens(sim, dt, driving);
-    updateWeather(sim, dt);
-    updateMotions(sim, dt);
-    updateWater(sim, dt);
+    let budget = step * rate;
+    let hops = 0;
+    while (budget > 0.0001 && hops < 16 && !sim.over) {
+      const bit = Math.min(0.4, budget);
+      updateDay(sim, bit, driving);
+      const auto = steer(sim, bit, driving);
+      const input = driving ? movement(keys, yaw) : (auto || { move: 0, mz: 0 });
+      const paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : input;
+      sim.character.update(bit, paced, sim.time);
+      updateSticks(sim, bit);
+      updateGrowth(sim, bit);
+      updateGardens(sim, bit, driving);
+      updateWeather(sim, bit);
+      updateMotions(sim, bit);
+      updateWater(sim, bit);
+      sim.stage.update(bit, sim.time);
+      sim.time += bit;
+      budget -= bit;
+      hops += 1;
+    }
+    if (sim.time - (sim.savedAt || 0) > Math.max(5, rate * 2)) {
+      sim.savedAt = sim.time;
+      writeForest(sim, forestSeed);
+    }
+  } else {
     sim.stage.update(dt, sim.time);
-    sim.time += dt;
+    if (driving) {
+      const input = movement(keys, yaw);
+      sim.character.update(dt, input, sim.time);
+      sim.time += dt;
+    }
   }
   drainEvents();
   paintHud();
@@ -520,7 +795,6 @@ function frame(now) {
     say(error instanceof Error ? error.message : String(error));
     return;
   }
-  if (sim.seasonTime > SEASON_LENGTH) sim.seasonTime = SEASON_LENGTH;
   renderSpecimen(dt);
   renderSpirit(dt);
   requestAnimationFrame(frame);
@@ -541,11 +815,11 @@ function floraRows() {
     if (plot.growth >= 1) row.ripe += 1;
     crops.set(plot.crop, row);
   }
-  const order = { tree: 0, crop: 1, shrub: 2, plant: 3, motion: -1 };
+  const order = { tree: 0, crop: 1, weather: 2, shrub: 3, plant: 4, motion: -1 };
   const plants = FLORA.map(item => {
     const planted = trees.get(item.id) || 0;
     const crop = crops.get(item.id);
-    let state = 'Not sown';
+    let state = item.group === 'weather' ? 'On the cube' : 'Not sown';
     if (planted) state = `${planted} on the cube`;
     else if (crop) state = crop.ripe ? `${crop.n} · ${crop.ripe} ripe` : `${crop.n} growing`;
     return { ...item, state, living: planted || crop?.n || 0 };
@@ -598,25 +872,90 @@ function paintFlora(force) {
   document.querySelector('#specimen-name').textContent = current.name;
   document.querySelector('#specimen-note').textContent = current.note;
   document.querySelector('#specimen-state').textContent = current.state;
+  paintStudies();
 }
 paintFlora.at = -1;
 
-function showSpecimen(id) {
+function paintStudies() {
+  const tabs = document.querySelector('#specimen-tabs');
+  const line = document.querySelector('#specimen-study');
+  if (!tabs || !line) return;
+  const studies = studiesFor(specimenId);
+  if (studies.length < 2) {
+    tabs.replaceChildren();
+    tabs.hidden = true;
+    line.textContent = specimenBroken || '';
+    line.classList.toggle('broken', Boolean(specimenBroken));
+    return;
+  }
+  tabs.hidden = false;
+  const same = tabs.childElementCount === studies.length
+    && [...tabs.children].every((button, index) => button.dataset.take === studies[index].id);
+  if (!same) {
+    tabs.replaceChildren(...studies.map(study => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'study-tab';
+      button.role = 'tab';
+      button.dataset.take = study.id;
+      button.textContent = study.name;
+      button.addEventListener('click', () => showStudy(study.id));
+      return button;
+    }));
+  }
+  for (const button of tabs.children) {
+    const on = button.dataset.take === specimenTake;
+    button.setAttribute('aria-selected', String(on));
+    button.tabIndex = on ? 0 : -1;
+  }
+  if (specimenBroken) {
+    line.textContent = specimenBroken;
+    line.classList.add('broken');
+    return;
+  }
+  line.classList.remove('broken');
+  const study = studies.find(item => item.id === specimenTake) || studies[0];
+  line.textContent = study.line;
+}
+
+function showStudy(take) {
+  specimenTakes.set(specimenId, take);
+  showSpecimen(specimenId, take);
+}
+
+function showSpecimen(id, take) {
+  if (id !== specimenId) specimenYaw = Math.PI / 4;
   specimenId = id;
-  specimenYaw = Math.PI / 4;
+  const studies = studiesFor(id);
+  const wanted = take || specimenTakes.get(id) || cubeTake(id);
+  specimenTake = studies.some(item => item.id === wanted) ? wanted : (studies[0]?.id || cubeTake(id));
   const kit = { makeBuilder, makeSculpt, KIT, PixelLook };
   const motion = MOTIONS.some(item => item.id === id);
   try {
-    specimenView = motion ? buildMotion(kit, id) : buildSpecimen(kit, id);
+    specimenView = motion ? buildMotion(kit, id) : buildSpecimen(kit, id, specimenTake);
     const view = document.querySelector('#specimen');
     specimenRenderer ??= createRenderer(view, { toolkit: { KIT, PixelLook } });
-    document.querySelector('#specimen-note').textContent = '';
+    specimenBroken = '';
   } catch (error) {
     specimenView = null;
-    document.querySelector('#specimen-note').textContent = error instanceof Error ? error.message : String(error);
+    specimenBroken = error instanceof Error ? error.message : String(error);
   }
   paintFlora(true);
+  const sow = document.querySelector('#sow');
+  const flora = floraById(id);
+  if (sow) {
+    sow.hidden = !flora || flora.group === 'weather';
+    sow.textContent = flora && sim?.sow?.id === id ? 'Click the ground' : 'Plant this';
+  }
   document.querySelector(`#flora-list button[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+function stepStudy(dir) {
+  const studies = studiesFor(specimenId);
+  if (studies.length < 2) return;
+  const at = Math.max(0, studies.findIndex(item => item.id === specimenTake));
+  const next = studies[(at + dir + studies.length) % studies.length];
+  showStudy(next.id);
 }
 
 function stepSpecimen(dir) {
@@ -675,7 +1014,10 @@ function paintSpirits(force) {
   for (const item of SPIRITS) {
     const button = list.querySelector(`button[data-id="${item.id}"]`);
     const wearing = item.id === sim.spiritId;
-    button.querySelector('.state').textContent = wearing ? 'wearing' : 'waiting';
+    const home = sim.measures?.[item.id]?.home;
+    const fits = home === seasonOf(sim).id;
+    const word = { SPR: 'spring', SUM: 'summer', AUT: 'autumn', WIN: 'winter' }[home] || '';
+    button.querySelector('.state').textContent = wearing ? (fits ? 'wearing · fits' : 'wearing') : (fits ? 'fits' : word);
     button.setAttribute('aria-current', wearing ? 'true' : 'false');
     button.closest('li').classList.toggle('living', wearing);
   }
@@ -683,7 +1025,8 @@ function paintSpirits(force) {
   document.querySelector('#spirit-group').textContent = current.group;
   document.querySelector('#spirit-name').textContent = current.name;
   document.querySelector('#spirit-note').textContent = current.note;
-  document.querySelector('#spirit-state').textContent = 'Wearing this body';
+  const home = sim.measures?.[current.id]?.home;
+  document.querySelector('#spirit-state').textContent = fitLine(current.voice, seasonOf(sim).id, home);
 }
 paintSpirits.at = -1;
 
@@ -705,7 +1048,9 @@ function ensureSpirit(id) {
 
 function chooseSpirit(id) {
   const changed = wearSpirit(sim, id);
-  if (changed) say(spiritById(id).name);
+  const row = sim.measures?.[id];
+  if (changed && row) say(fitLine(spiritById(id).voice, seasonOf(sim).id, row.home));
+  if (god) syncGod();
   if (!document.querySelector('#spirits').hidden) {
     ensureSpirit(id);
     paintSpirits(true);
@@ -744,23 +1089,241 @@ function renderSpirit(dt) {
   });
 }
 
+function paintMeasures() {
+  const panel = document.querySelector('#measures');
+  if (!panel || !sim?.measures) return;
+  const libraryOpen = !document.querySelector('#flora').hidden || !document.querySelector('#spirits').hidden;
+  panel.hidden = libraryOpen;
+  const row = wornMeasures(sim);
+  const season = seasonOf(sim);
+  const JOB = {
+    cloud: 'keeps the gate',
+    water: 'wades the mouth',
+    tree: 'shakes the wood',
+    mushroom: 'eats what is ripe',
+    moss: 'knits the mound',
+    fire: 'dries the stack',
+    snow: 'finds what winter buried'
+  };
+  const name = spiritById(sim.spiritId).name;
+  const seasonWord = { SPR: 'spring', SUM: 'summer', AUT: 'autumn', WIN: 'winter' }[season.id] || 'the year';
+  const edge = EDGE_NAME[season.edge] || 'north';
+  document.querySelector('#fit-line').textContent = row.home === season.id
+    ? `${name} ${JOB[sim.spiritId] || 'keeps the idol'}.`
+    : `${name} looks ${edge}. ${seasonWord[0].toUpperCase()}${seasonWord.slice(1)} asks more.`;
+  const line = document.querySelector('#measure-line');
+  line.hidden = true;
+  const press = pressureOf(sim.year, sim.measures.climb);
+  const ring = sim.holding ? 'the circle holds' : 'the circle is open';
+  const fitsNow = Object.entries(sim.measures)
+    .filter(([, value]) => value && value.home === season.id)
+    .map(([id]) => id);
+  const wearingFits = fitsNow.includes(sim.spiritId);
+  const otherName = !wearingFits && fitsNow[0] ? spiritById(fitsNow[0]).name : '';
+  const hint = sim.yearLine || (otherName ? `${otherName} fits ${seasonWord}.` : 'Keep the idol dry.');
+  const planted = sim.trees.filter(tree => tree.planted && !tree.fallen).length;
+  const sown = planted ? `  ·  ${planted}\u00a0planted` : '';
+  const rate = Math.round(sim.speed || 1);
+  const clock = rate > 1 ? `×${rate}  ·  ` : '';
+  document.querySelector('#run-line').textContent = `${clock}water ×${press.toFixed(2)}  ·  ${ring}${sown}  ·  ${hint}`;
+  if (!document.querySelector('#god-panel').hidden) syncGod();
+}
+
+function syncGod() {
+  if (!sim?.measures) return;
+  const row = wornMeasures(sim);
+  for (const input of document.querySelectorAll('#god-panel input[data-key]')) {
+    if (document.activeElement === input) continue;
+    if (input.dataset.key === 'climb') input.value = String(Math.round(sim.measures.climb * 100));
+    else input.value = String(Math.round((row[input.dataset.key] || 0) * 100));
+    const out = input.parentElement.querySelector('output');
+    if (!out) continue;
+    out.textContent = input.dataset.key === 'climb'
+      ? `+${sim.measures.climb.toFixed(2)}`
+      : input.value;
+  }
+  for (const button of document.querySelectorAll('#god-homes button')) {
+    button.setAttribute('aria-pressed', String(button.dataset.home === row.home));
+  }
+}
+
+function buildGod() {
+  const root = document.querySelector('#god-panel');
+  if (!root || root.childElementCount) return;
+  const speed = document.createElement('label');
+  const speedName = document.createElement('span');
+  speedName.textContent = 'Speed';
+  const speedOut = document.createElement('output');
+  const speedInput = document.createElement('input');
+  speedInput.type = 'range';
+  speedInput.min = '1';
+  speedInput.max = '100';
+  speedInput.step = '1';
+  speedInput.dataset.speed = '1';
+  speedInput.value = String(Math.round(sim?.speed || 1));
+  speedOut.textContent = `×${speedInput.value}`;
+  speedInput.addEventListener('input', () => {
+    const next = Math.min(100, Math.max(1, Math.round(Number(speedInput.value) || 1)));
+    sim.speed = next;
+    sim.fast = next >= 8;
+    speedOut.textContent = `×${next}`;
+    try { sessionStorage.setItem('hugelkultur-speed', String(next)); } catch { /* this run still hurries */ }
+    paintMeasures();
+  });
+  speed.append(speedName, speedOut, speedInput);
+  root.append(speed);
+  for (const [key, label] of MEASURE_KEYS) {
+    const wrap = document.createElement('label');
+    const name = document.createElement('span');
+    name.textContent = label;
+    const out = document.createElement('output');
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0';
+    input.max = '100';
+    input.step = '1';
+    input.dataset.key = key;
+    input.addEventListener('input', () => {
+      sim.measures[sim.spiritId][key] = Number(input.value) / 100;
+      out.textContent = input.value;
+      saveMeasures(sim.measures);
+      paintMeasures();
+    });
+    wrap.append(name, out, input);
+    root.append(wrap);
+  }
+  const homes = document.createElement('div');
+  homes.className = 'look-patterns';
+  homes.id = 'god-homes';
+  for (const id of ['SPR', 'SUM', 'AUT', 'WIN']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.home = id;
+    button.textContent = SEASON_NAME[id];
+    button.addEventListener('click', () => {
+      sim.measures[sim.spiritId].home = id;
+      saveMeasures(sim.measures);
+      syncGod();
+      paintMeasures();
+      paintSpirits(true);
+      say(fitLine(sim.voice, seasonOf(sim).id, id));
+    });
+    homes.append(button);
+  }
+  const climb = document.createElement('label');
+  const climbName = document.createElement('span');
+  climbName.textContent = 'Climb';
+  const climbOut = document.createElement('output');
+  const climbInput = document.createElement('input');
+  climbInput.type = 'range';
+  climbInput.min = '0';
+  climbInput.max = '80';
+  climbInput.step = '1';
+  climbInput.dataset.key = 'climb';
+  climbInput.addEventListener('input', () => {
+    sim.measures.climb = Number(climbInput.value) / 100;
+    climbOut.textContent = `+${sim.measures.climb.toFixed(2)}`;
+    saveMeasures(sim.measures);
+    paintMeasures();
+  });
+  climb.append(climbName, climbOut, climbInput);
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.id = 'god-reset';
+  reset.textContent = 'Original measures';
+  reset.addEventListener('click', () => {
+    sim.measures = blankMeasures();
+    saveMeasures(sim.measures);
+    syncGod();
+    paintMeasures();
+  });
+  const same = document.createElement('button');
+  same.type = 'button';
+  same.id = 'god-same';
+  same.textContent = 'Same wood';
+  same.addEventListener('click', sameWood);
+  root.append(homes, climb, reset, same);
+}
+
+function setGod(open) {
+  god = open;
+  const panel = document.querySelector('#god-panel');
+  const button = document.querySelector('#god-toggle');
+  if (!panel || !button) return;
+  panel.hidden = !open;
+  button.setAttribute('aria-pressed', String(open));
+  button.textContent = open ? 'Done' : 'Bend';
+  document.querySelector('#measures')?.classList.toggle('bending', open);
+  if (open) syncGod();
+}
+
+const GRID_KEY = 'hugelkultur-grid';
+
+function savedGrid() {
+  try {
+    const grid = Number(sessionStorage.getItem(GRID_KEY));
+    if (grid === 32 || grid === 64) return grid;
+  } catch { /* the small clearing remains */ }
+  return 16;
+}
+
 function boot() {
+  useGrid(savedGrid());
+  dist = homeDist();
+  distTo = dist;
+  forestSeed = sceneSeed();
+  const fresh = sessionStorage.getItem('hugelkultur-fresh') === '1';
+  if (fresh) sessionStorage.removeItem('hugelkultur-fresh');
+  bakedFidelity = LOOK.fidelity;
+  setScene({ seed: forestSeed, fidelity: LOOK.fidelity, grid: GRID });
   const kit = { makeBuilder, makeSculpt, KIT, PixelLook };
   sim = buildWorld(kit, { createFrame: createStickSystem, createAvatar, drawGrowth, createWater });
+  sim.measures = loadMeasures();
+  try {
+    const savedSpeed = Number(sessionStorage.getItem('hugelkultur-speed'));
+    if (savedSpeed >= 1 && savedSpeed <= 100) sim.speed = savedSpeed;
+  } catch { /* the year keeps its own pace */ }
+  const saved = fresh ? null : readForest();
+  if (saved && saved.seed === forestSeed) {
+    applyForest(sim, saved);
+    if (sim.pendingSpirit && sim.pendingSpirit !== sim.spiritId) wearSpirit(sim, sim.pendingSpirit);
+    catchUp(sim, Date.now() - (saved.at || Date.now()));
+  }
+  seedSquirrels(sim);
+  revealGlade(sim);
+  markMouth(sim);
   renderer = createRenderer(canvas, { toolkit: { KIT, PixelLook } });
+  buildGod();
   applyLook();
+  paintLook();
+  for (const button of document.querySelectorAll('.sizes button')) {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.grid) === GRID));
+  }
   say('Keep the idol dry.');
+  if (!sim.taught && (sim.year || 1) === 1 && (sim.seasonIndex || 0) === 0) {
+    sim.taught = true;
+    const edge = EDGE_NAME[seasonOf(sim).edge] || 'north';
+    sim.events.push({ type: 'season', text: `Spring comes from the ${edge}. The mouth is marked.` });
+  }
   paintHud();
   requestAnimationFrame(frame);
 }
 
 window.addEventListener('keydown', event => {
-  if (event.target.closest?.('#look-panel')) return;
+  if (event.target.closest?.('input, textarea, select')) return;
   if (event.repeat || !sim) return;
+  if (event.code === 'KeyG') {
+    event.preventDefault();
+    setGod(!god);
+    return;
+  }
   if (event.code === 'Space') {
     event.preventDefault();
     if (sim.held) sim.eatQueued = true;
     else sim.placeQueued = true;
+  } else if (!floraPanel.hidden && (event.code === 'BracketLeft' || event.code === 'BracketRight')) {
+    event.preventDefault();
+    stepStudy(event.code === 'BracketRight' ? 1 : -1);
   } else if (!floraPanel.hidden && (event.code === 'ArrowLeft' || event.code === 'ArrowRight')) {
     event.preventDefault();
     stepSpecimen(event.code === 'ArrowRight' ? 1 : -1);
@@ -830,6 +1393,8 @@ canvas.addEventListener('pointerdown', event => {
     id: event.pointerId,
     x: event.clientX,
     y: event.clientY,
+    ox: event.clientX,
+    oy: event.clientY,
     yaw,
     pitch,
     mode,
@@ -889,14 +1454,27 @@ function endOrbit(event) {
   const mode = orbit.mode;
   const x = event.clientX;
   const y = event.clientY;
+  const travel = Math.hypot(x - orbit.ox, y - orbit.oy);
+  const sowing = Boolean(sim?.sow) && mode === 'orbit' && travel < 28;
   orbit = null;
   if (moved && (pitch < 0.08 || pitch > 1.45)) {
     settle = { yaw, pitch: Math.min(1.45, Math.max(0.08, pitch)) };
   }
   paintCursor();
+  if (sowing) {
+    const ground = pickGround(x, y);
+    if (ground) plantAt(sim, ground);
+    else sim.events.push({ type: 'sow', text: 'That is not ground.' });
+    paintCursor();
+    return;
+  }
   if (moved || mode !== 'orbit' || !sim) return;
   const hit = pick(x, y);
   if (hit) focusSubject(hit, false);
+  else {
+    const ground = pickGround(x, y);
+    if (ground) sendHer(ground);
+  }
 }
 canvas.addEventListener('pointerup', endOrbit);
 canvas.addEventListener('pointercancel', endOrbit);
@@ -922,8 +1500,32 @@ canvas.addEventListener('wheel', event => {
   const step = Math.max(-180, Math.min(180, dy));
   zoomAt(event.clientX, event.clientY, dist * Math.exp(step * 0.0016));
 }, { passive: false });
-document.querySelector('#restart').addEventListener('click', () => location.reload());
-document.querySelector('#end-restart').addEventListener('click', () => location.reload());
+document.querySelector('#restart').addEventListener('click', beginAgain);
+for (const button of document.querySelectorAll('.sizes button')) {
+  button.addEventListener('click', () => {
+    const next = Number(button.dataset.grid);
+    if (next === GRID) return;
+    try { sessionStorage.setItem(GRID_KEY, String(next)); } catch { /* this clearing stays */ }
+    location.reload();
+  });
+}
+document.querySelector('#end-restart').addEventListener('click', beginAgain);
+document.querySelector('#end-same')?.addEventListener('click', sameWood);
+document.querySelector('#god-toggle')?.addEventListener('click', () => setGod(!god));
+document.querySelector('#sow')?.addEventListener('click', () => {
+  const item = floraById(specimenId);
+  if (!item || !sim) return;
+  sim.sow = { id: item.id };
+  say(item.group === 'crop' ? 'Click a finished mound.' : 'Click the ground.');
+  setLibrary(null);
+  paintCursor();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && sim) writeForest(sim, forestSeed);
+});
+window.addEventListener('pagehide', () => {
+  if (sim) writeForest(sim, forestSeed);
+});
 document.querySelector('#sound').addEventListener('click', event => {
   audioEnabled = !audioEnabled;
   event.currentTarget.setAttribute('aria-pressed', String(audioEnabled));
@@ -949,6 +1551,7 @@ function setLibrary(which) {
     ensureSpirit(sim.spiritId);
     paintSpirits(true);
   }
+  paintMeasures();
 }
 
 const lookToggle = document.querySelector('#look-toggle');
@@ -961,8 +1564,23 @@ lookToggle.addEventListener('click', () => {
   lookToggle.setAttribute('aria-expanded', String(open));
 });
 for (const input of lookPanel.querySelectorAll('input')) input.addEventListener('input', readLook);
+document.querySelector('#look-fidelity').addEventListener('change', () => {
+  const next = clampLook(Math.round(Number(document.querySelector('#look-fidelity').value)), 1, 4);
+  LOOK.fidelity = next;
+  saveLook();
+  if (next !== bakedFidelity) location.reload();
+});
+const hintBar = document.querySelector('#hint-bar');
+try {
+  if (localStorage.getItem(HINT_KEY) === 'closed') hintBar.hidden = true;
+} catch { /* the bar can still be closed this visit */ }
+document.querySelector('#hint-close').addEventListener('click', () => {
+  hintBar.hidden = true;
+  try { localStorage.setItem(HINT_KEY, 'closed'); } catch { /* it is already gone */ }
+});
 for (const button of lookPanel.querySelectorAll('[data-pattern]')) {
   button.addEventListener('click', () => {
+    LOOK.hand = true;
     LOOK.pattern = button.dataset.pattern;
     applyLook();
     saveLook();
@@ -1001,6 +1619,16 @@ spiritCanvas.addEventListener('pointerup', () => { spiritDrag = null; });
 spiritCanvas.addEventListener('pointercancel', () => { spiritDrag = null; });
 window.addEventListener('keydown', event => {
   if (event.code !== 'Escape') return;
+  if (sim?.sow) {
+    sim.sow = null;
+    say('You put the seed back.');
+    paintCursor();
+    return;
+  }
+  if (god) {
+    setGod(false);
+    return;
+  }
   if (!lookPanel.hidden) {
     lookPanel.hidden = true;
     lookToggle.setAttribute('aria-expanded', 'false');

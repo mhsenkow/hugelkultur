@@ -1,4 +1,4 @@
-import { paintCrop } from './gardens.js';
+import { paintCrop } from './gardens.js?v=age3';
 
 // The motions the library keeps, and the game plays.
 export const MOTIONS = [
@@ -47,7 +47,10 @@ function drawPick(draw, sim, motion) {
 function drawEat(draw, sim, motion) {
   const k = Math.min(1, motion.t / motion.dur);
   const [x, y, z] = hand(sim);
-  paintCrop(draw, motion.crop, x, y + 0.04, z, Math.max(0.08, 1 - k));
+  paintCrop(draw, motion.crop, x, y + 0.08, z, Math.max(0.15, 1 - k));
+  if (k > 0.35) {
+    paintCrop(draw, motion.crop, x + 0.06, y + 0.02 - k * 0.08, z + 0.04, 0.28);
+  }
 }
 
 function drawHeld(draw, sim, scale) {

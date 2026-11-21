@@ -3,10 +3,12 @@
 export const FLORA = [
   { id: 'oak', name: 'White oak', group: 'tree', swatch: '#1c6b40', note: 'Dense crown. Heavy sticks.' },
   { id: 'maple', name: 'Sugar maple', group: 'tree', swatch: '#4fd18b', note: 'Open crown. You can see through it.' },
-  { id: 'birch', name: 'Paper birch', group: 'tree', swatch: '#f3d7a6', note: 'Pale trunk. A thin crown.' },
+  { id: 'birch', name: 'Paper birch', group: 'tree', swatch: '#f3d7a6', note: 'Pale trunk. A round crown.' },
   { id: 'carrot', name: 'Carrot', group: 'crop', swatch: '#d97736', note: 'A bite, and the step quickens.', pace: 1.42, lasts: 9 },
   { id: 'turnip', name: 'Turnip', group: 'crop', swatch: '#f7efe2', note: 'A long, steady hurry.', pace: 1.34, lasts: 12 },
   { id: 'mushroom', name: 'Meadow mushroom', group: 'crop', swatch: '#e0a04a', note: 'A short, sharp hurry.', pace: 1.58, lasts: 7 },
+  { id: 'leaf', name: 'Fallen leaf', group: 'weather', swatch: '#e0a04a', note: 'Autumn. They stay on the cube.' },
+  { id: 'snow', name: 'Snow', group: 'weather', swatch: '#f7efe2', note: 'Winter. A quilt, not a slash.' },
   { id: 'beech', name: 'American beech', group: 'tree', swatch: '#2f8f55', note: 'Smooth bark.' },
   { id: 'ash', name: 'White ash', group: 'tree', swatch: '#8d5b4c', note: 'Light wood.' },
   { id: 'linden', name: 'Linden', group: 'tree', swatch: '#b6e38a', note: 'Heart leaves.' },
