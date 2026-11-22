@@ -1,6 +1,6 @@
-import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=fifty';
-import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice } from './clearing.js?v=fifty';
-import { settleMounds } from './growth.js?v=fifty';
+import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=hold';
+import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice } from './clearing.js?v=hold';
+import { settleMounds } from './growth.js?v=hold';
 
 export const SEASON_LENGTH = 52;
 
@@ -81,7 +81,14 @@ function opticsFor(season) {
 
 function terrainAt(sim, x, z) {
   const cell = cellAt(sim.cells, x, z);
-  return cell ? bedHeight(cell) : 1.4;
+  const height = cell ? bedHeight(cell) : 1.4;
+  return Number.isFinite(height) ? height : 1.4;
+}
+
+function rateOf(value, cap = 8) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(cap, n);
 }
 
 export function createWater(KIT, sim) {
@@ -106,9 +113,13 @@ export function createWater(KIT, sim) {
 function publish(sim) {
   const shot = sim.solver.snapshot();
   sim.snapshot = shot;
-  const { waterBodies } = sim.kit.KIT.procedural;
-  const body = waterBodies.fromShallowWater(shot, { id: 'clearing', optics: opticsFor(seasonOf(sim)) });
-  sim.world.water = waterBodies.scene([body]);
+  try {
+    const { waterBodies } = sim.kit.KIT.procedural;
+    const body = waterBodies.fromShallowWater(shot, { id: 'clearing', optics: opticsFor(seasonOf(sim)) });
+    sim.world.water = waterBodies.scene([body]);
+  } catch {
+    /* keep the last water that drew */
+  }
 }
 
 function rememberWater(sim) {
@@ -290,33 +301,49 @@ export function updateWater(sim, dt) {
     turned += 1;
   }
   if (sim.bedDirty) {
-    sim.solver.setTerrain((x, z) => terrainAt(sim, x, z));
-    sim.bedDirty = false;
+    try {
+      sim.solver.setTerrain((x, z) => terrainAt(sim, x, z));
+      sim.bedDirty = false;
+    } catch {
+      sim.bedDirty = false;
+    }
   }
   const current = seasonOf(sim);
   const leave = OPPOSITE[current.edge];
   const press = pressureOf(sim.year, sim.measures?.climb);
   const ease = 1 / (1 + Math.max(0, sim.year - 1) * Math.min(0.18, sim.measures?.climb ?? 0.22));
-  sim.solver.step(dt, {
-    friction: current.friction,
-    rain: (x, z) => {
-      let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press) : 0;
-      const cell = cellAt(sim.cells, x, z);
-      if (cell?.thaw) rate += Math.min(0.02, cell.thaw);
-      return rate;
-    },
-    drain: (x, z, _t, state) => {
-      let rate = current.drain * ease;
-      if (atMouth(sim.cells, x, z, leave)) rate += 0.04;
-      if (state.depth < 0.02) rate += 0.012;
-      return rate;
+  const tick = Number.isFinite(dt) ? Math.max(0, Math.min(0.4, dt)) : 0;
+  if (tick > 0) {
+    try {
+      sim.solver.step(tick, {
+        friction: current.friction,
+        rain: (x, z) => {
+          let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press) : 0;
+          const thaw = Number(cellAt(sim.cells, x, z)?.thaw);
+          if (Number.isFinite(thaw) && thaw > 0) rate += Math.min(0.02, thaw);
+          return rateOf(rate);
+        },
+        drain: (x, z, _t, state) => {
+          let rate = current.drain * ease;
+          if (atMouth(sim.cells, x, z, leave)) rate += 0.04;
+          if (state.depth < 0.02) rate += 0.012;
+          return rateOf(rate, 1e4);
+        }
+      });
+    } catch {
+      /* a stiff tick is skipped. The cube still turns. */
     }
-  });
-  publish(sim);
+  }
+  try {
+    publish(sim);
+  } catch {
+    /* keep the last water that drew */
+  }
 
   const depth = idolDepth(sim);
   const stage = idolStage(depth);
-  if (depth > (sim.highWater || 0)) sim.highWater = depth;
+  if (Number.isFinite(depth) && depth > (sim.highWater || 0)) sim.highWater = depth;
+  if (!Number.isFinite(sim.flood)) sim.flood = 0;
   const rank = { dry: 0, hem: 1, drinks: 2, under: 3 };
   if ((rank[stage] || 0) > (rank[sim.seasonPeak] || 0)) sim.seasonPeak = stage;
   if (stage === 'drinks') sim.flood += dt * 0.05;

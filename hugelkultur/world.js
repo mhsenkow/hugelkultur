@@ -1,6 +1,6 @@
-import { layGardens } from './gardens.js?v=fifty';
-import { sculptTree } from './specimens.js?v=fifty';
-import { freshChronicle, gladeBeams } from './clearing.js?v=fifty';
+import { layGardens } from './gardens.js?v=hold';
+import { sculptTree } from './specimens.js?v=hold';
+import { freshChronicle, gladeBeams } from './clearing.js?v=hold';
 
 export const GRID_SIZES = [16, 32, 64];
 export let GRID = 16;
@@ -149,6 +149,11 @@ export function hash(n) {
   return ((a ^ (a >>> 16)) >>> 0) / 4294967296;
 }
 
+export function finite(n, fallback = 0) {
+  const value = Number(n);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 export function cellCenter(i, k) {
   return { x: ORIGIN + (i + 0.5), z: ORIGIN + (k + 0.5) };
 }
@@ -178,13 +183,13 @@ export function brickGain(have, want) {
 }
 
 function risen(cell) {
-  let stack = cell.sunk || 0;
+  let stack = finite(cell.sunk);
   if (!(cell.sunk > 0) && !Array.isArray(cell.block)) {
-    const hidden = Math.max(0, (cell.cubes || 0) - DIRT_CAP);
+    const hidden = Math.max(0, finite(cell.cubes) - DIRT_CAP);
     stack += hidden * DIRT_CUBE;
   }
-  for (const height of blockHeights(cell)) stack += height;
-  return (cell.land || 0) + stack;
+  for (const height of blockHeights(cell)) stack += finite(height);
+  return finite(cell.land) + stack;
 }
 
 export function walkHeight(cell) {
@@ -198,23 +203,27 @@ export function walkHeight(cell) {
 
 export function bedHeight(cell) {
   const land = risen(cell);
+  const floor = finite(cell.elevation, 0.9);
   let height;
-  if (cell.plot) height = cell.elevation + land + 0.3;
+  if (cell.plot) height = floor + land + 0.3;
   else if (cell.berm) {
-    const stack = (cell.sunk || 0) + blockHeights(cell).reduce((sum, height) => sum + height, 0);
+    const stack = finite(cell.sunk) + blockHeights(cell).reduce((sum, height) => sum + finite(height), 0);
     const body = cell.rock
       ? 0.2
-      : 0.5 + Math.min(cell.coat || 1, 6) * 0.06 + (cell.lift || 0) * 0.1;
+      : 0.5 + Math.min(finite(cell.coat, 1), 6) * 0.06 + finite(cell.lift) * 0.1;
     const extra = Math.min(body, Math.max(0, CREST - stack));
-    height = cell.elevation + land + extra;
-  } else if (cell.hearth) height = cell.elevation + PEDESTAL;
-  else height = cell.elevation + land + cell.layers * 0.16 * (1 + Math.min(cell.mass || 0, 3) * 0.05);
+    height = floor + land + extra;
+  } else if (cell.hearth) height = floor + PEDESTAL;
+  else height = floor + land + finite(cell.layers) * 0.16 * (1 + Math.min(finite(cell.mass), 3) * 0.05);
   if (cell.rooted) height += 0.16;
-  if (cell.raft) height += Math.min(0.22, cell.raft * 0.1);
-  if (cell.sill) height += cell.sill;
+  const raft = finite(cell.raft);
+  if (raft) height += Math.min(0.22, raft * 0.1);
+  const sill = finite(cell.sill);
+  if (sill) height += sill;
   // A drift is a soft crust. It eases the water aside and it does not lift the lake.
-  if (!cell.hearth && cell.snow > 0.08) height += Math.min(cell.snow, 1.2) * 0.07;
-  return height;
+  const snow = finite(cell.snow);
+  if (!cell.hearth && snow > 0.08) height += Math.min(snow, 1.2) * 0.07;
+  return Number.isFinite(height) ? height : floor;
 }
 
 export function copyFingers() {

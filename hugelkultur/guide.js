@@ -1,7 +1,7 @@
-import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=fifty';
-import { seasonOf } from './water.js?v=fifty';
-import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater } from './clearing.js?v=fifty';
-import { sowWood } from './sticks.js?v=fifty';
+import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=hold';
+import { seasonOf } from './water.js?v=hold';
+import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater } from './clearing.js?v=hold';
+import { sowWood } from './sticks.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 

@@ -331,9 +331,10 @@ export function buried(cell) {
 }
 
 export function idolStage(depth) {
-  if (depth < 0.008) return 'dry';
-  if (depth < 0.02) return 'hem';
-  if (depth < 0.045) return 'drinks';
+  const d = Number(depth);
+  if (!Number.isFinite(d) || d < 0.008) return 'dry';
+  if (d < 0.02) return 'hem';
+  if (d < 0.045) return 'drinks';
   return 'under';
 }
 

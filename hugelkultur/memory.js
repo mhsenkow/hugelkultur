@@ -1,7 +1,7 @@
-import { GRID, cellAt } from './world.js?v=fifty';
-import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=fifty';
-import { beginMound, raiseLand, settleMounds } from './growth.js?v=fifty';
-import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js?v=fifty';
+import { GRID, cellAt } from './world.js?v=hold';
+import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=hold';
+import { beginMound, raiseLand, settleMounds } from './growth.js?v=hold';
+import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js?v=hold';
 
 const FOREST_KEY = 'hugelkultur-forest';
 

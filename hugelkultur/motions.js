@@ -1,4 +1,4 @@
-import { paintCrop } from './gardens.js?v=fifty';
+import { paintCrop } from './gardens.js?v=hold';
 
 // The motions the library keeps, and the game plays.
 export const MOTIONS = [
@@ -14,9 +14,23 @@ const SOIL = { width: 0.16, color: 11, density: 2.5, emissive: false, depth: tru
 const STICK = { width: 0.05, color: 10, density: 2.2, emissive: false, depth: true };
 const SNOW = { width: 0.06, color: 6, density: 2.2, emissive: false, depth: true };
 
+const MOTION_CAP = 24;
+
+export function pushMotion(sim, motion, cap = MOTION_CAP) {
+  if (!sim) return;
+  const list = Array.isArray(sim.motions) ? sim.motions : (sim.motions = []);
+  if (!motion || !Number.isFinite(motion.dur) || motion.dur <= 0) return;
+  if (!Number.isFinite(motion.t)) motion.t = 0;
+  list.push(motion);
+  if (list.length > cap) list.splice(0, list.length - cap);
+}
+
 export function updateMotions(sim, dt) {
-  for (const motion of sim.motions) motion.t += dt;
-  sim.motions = sim.motions.filter(motion => motion.t < motion.dur);
+  const list = Array.isArray(sim.motions) ? sim.motions : (sim.motions = []);
+  const step = Number.isFinite(dt) ? dt : 0;
+  for (const motion of list) motion.t = (Number.isFinite(motion.t) ? motion.t : 0) + step;
+  sim.motions = list.filter(motion => Number.isFinite(motion.t) && Number.isFinite(motion.dur) && motion.t < motion.dur);
+  if (sim.motions.length > MOTION_CAP) sim.motions = sim.motions.slice(-MOTION_CAP);
 }
 
 const RIPPLE = { width: 0.022, color: 12, density: 1.2, emissive: false, depth: true };
@@ -26,9 +40,15 @@ const DREAM = { width: 0.03, color: 6, density: 0.9, emissive: true, depth: true
 const SEASON_INK = { SPR: 8, SUM: 13, AUT: 10, WIN: 6 };
 const WAKE_INK = { cloud: 6, water: 12, tree: 5, mushroom: 10, moss: 7, fire: 14, snow: 6 };
 
+function ink(paint, width) {
+  const next = Number(width);
+  if (!Number.isFinite(next) || next <= 0) return null;
+  return { ...paint, width: Math.max(0.008, next) };
+}
+
 export function drawMotions(draw, sim) {
   let carrying = Boolean(sim.held);
-  for (const motion of sim.motions) {
+  for (const motion of sim.motions || []) {
     if (motion.t < 0) continue;
     if (motion.kind === 'pick' || motion.kind === 'eat') carrying = false;
     if (motion.kind === 'pick') drawPick(draw, sim, motion);
@@ -78,16 +98,18 @@ function drawHeld(draw, sim, scale) {
 
 function drawRipple(draw, motion) {
   const k = Math.min(1, motion.t / motion.dur);
+  const fade = Math.max(0, 1 - k);
+  const paint = ink(RIPPLE, 0.018 * fade);
+  if (!paint) return;
   for (const ring of [0.18, 0.34]) {
     const r = ring * (0.4 + k * 1.4);
-    const fade = Math.max(0, 1 - k);
     for (let i = 0; i < 8; i++) {
       const a0 = (i / 8) * Math.PI * 2;
       const a1 = ((i + 1) / 8) * Math.PI * 2;
       draw.streak(
         [motion.x + Math.cos(a0) * r, motion.y, motion.z + Math.sin(a0) * r],
         [motion.x + Math.cos(a1) * r, motion.y, motion.z + Math.sin(a1) * r],
-        { ...RIPPLE, width: 0.018 * fade }
+        paint
       );
     }
   }
@@ -99,12 +121,14 @@ function drawPuff(draw, motion) {
   const spread = motion.mode === 'inhale' ? (1 - k) * 0.18 : k * 0.28;
   const fade = motion.mode === 'inhale' ? k : 1 - k;
   const color = SEASON_INK[motion.ink] ?? 6;
+  const paint = ink({ color, density: 1.2, emissive: true, depth: true }, 0.04 * Math.max(0.15, fade));
+  if (!paint) return;
   for (let n = 0; n < 5; n++) {
     const a = n * 1.256;
     draw.streak(
       [motion.x, motion.y + rise * 0.4, motion.z],
       [motion.x + Math.cos(a) * spread, motion.y + rise, motion.z + Math.sin(a) * spread],
-      { width: 0.04 * Math.max(0.15, fade), color, density: 1.2, emissive: true, depth: true }
+      paint
     );
   }
 }
@@ -124,14 +148,15 @@ function drawSlide(draw, motion) {
 
 function drawDust(draw, motion) {
   const k = Math.min(1, motion.t / motion.dur);
-  const fade = 1 - k;
+  const paint = ink(DUST, 0.045 * (1 - k));
+  if (!paint) return;
   for (let n = 0; n < 4; n++) {
     const a = n * 1.7;
     const r = 0.06 + k * 0.22;
     draw.streak(
       [motion.x, motion.y + k * 0.08, motion.z],
       [motion.x + Math.cos(a) * r, motion.y + k * 0.18, motion.z + Math.sin(a) * r],
-      { ...DUST, width: 0.045 * fade }
+      paint
     );
   }
 }
@@ -159,14 +184,16 @@ function drawDream(draw, motion) {
 function drawWake(draw, motion) {
   const k = Math.min(1, motion.t / motion.dur);
   const color = WAKE_INK[motion.id] ?? 6;
+  const t = Math.max(0, 1 - k);
+  const paint = ink({ color, density: 1.1, emissive: true, depth: true }, 0.05 * t);
+  if (!paint) return;
   for (let n = 0; n < 3; n++) {
     const a = n * (Math.PI * 2 / 3) + 0.4;
-    const t = Math.max(0, 1 - k);
     const r = 0.28 * t;
     draw.streak(
       [motion.x + Math.cos(a) * r, motion.y + 0.1 + t * 0.2, motion.z + Math.sin(a) * r],
       [motion.x, motion.y + 0.5, motion.z],
-      { width: 0.05 * t, color, density: 1.1, emissive: true, depth: true }
+      paint
     );
   }
 }

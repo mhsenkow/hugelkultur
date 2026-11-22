@@ -1,15 +1,15 @@
-import { drawGardens, paintLeaf } from './gardens.js?v=fifty';
-import { drawMotions } from './motions.js?v=fifty';
-import { drawWeather, drawMemory } from './weather.js?v=fifty';
-import { drawRest } from './day.js?v=fifty';
-import { beginMound, raiseLand } from './growth.js?v=fifty';
-import { drawSigns } from './signs.js?v=fifty';
-import { INK, GRID, cellAt, hash, HEARTH_I, HEARTH_K, PAD, crownFade, walkHeight } from './world.js?v=fifty';
-import { facedCell } from './avatar.js?v=fifty';
-import { floraById } from './species.js?v=fifty';
-import { treeForm } from './specimens.js?v=fifty';
-import { seasonOf, seasonLength } from './water.js?v=fifty';
-import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN } from './clearing.js?v=fifty';
+import { drawGardens, paintLeaf } from './gardens.js?v=hold';
+import { drawMotions } from './motions.js?v=hold';
+import { drawWeather, drawMemory } from './weather.js?v=hold';
+import { drawRest } from './day.js?v=hold';
+import { beginMound, raiseLand } from './growth.js?v=hold';
+import { drawSigns } from './signs.js?v=hold';
+import { INK, GRID, cellAt, hash, HEARTH_I, HEARTH_K, PAD, crownFade, walkHeight } from './world.js?v=hold';
+import { facedCell } from './avatar.js?v=hold';
+import { floraById } from './species.js?v=hold';
+import { treeForm } from './specimens.js?v=hold';
+import { seasonOf, seasonLength } from './water.js?v=hold';
+import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN } from './clearing.js?v=hold';
 
 const CAPACITY = 8400;
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -424,6 +424,7 @@ function knitWillow(sim, cell) {
     nk: best.k,
     until: (sim.time || 0) + seasonLength(sim)
   });
+  if (sim.weaves.length > 8) sim.weaves.splice(0, sim.weaves.length - 8);
 }
 
 function compostStick(sim, stick) {

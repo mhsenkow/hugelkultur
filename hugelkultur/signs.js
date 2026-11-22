@@ -1,7 +1,7 @@
-import { INK, GRID, ORIGIN, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, hash, cellAt, bedHeight, walkHeight } from './world.js?v=fifty';
-import { seasonOf, seasonLength, idolDepth, OPPOSITE } from './water.js?v=fifty';
-import { idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants } from './clearing.js?v=fifty';
-import { nightAmount, dayIndex } from './day.js?v=fifty';
+import { INK, GRID, ORIGIN, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, hash, cellAt, bedHeight, walkHeight } from './world.js?v=hold';
+import { seasonOf, seasonLength, idolDepth, OPPOSITE } from './water.js?v=hold';
+import { idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants } from './clearing.js?v=hold';
+import { nightAmount, dayIndex } from './day.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const MARKS = ['tend', 'leaf', 'snow', 'rain'];
@@ -9,7 +9,9 @@ const BAND = { tend: INK.deep, leaf: INK.brass, snow: 6, rain: INK.lush };
 const SEASON_INK = { SPR: INK.lush, SUM: INK.brass, AUT: INK.stick, WIN: 6 };
 
 function stroke(color, width, extra = {}) {
-  return { width, color, density: extra.density ?? 2.1, emissive: extra.emissive ?? false, depth: true };
+  const next = Number(width);
+  const size = Number.isFinite(next) && next > 0 ? Math.max(0.008, next) : 0.008;
+  return { width: size, color, density: extra.density ?? 2.1, emissive: extra.emissive ?? false, depth: true };
 }
 
 function liveFinger(sim) {
@@ -41,6 +43,9 @@ export function offerHusk(sim) {
 
 export function updateSigns(sim, dt) {
   if (!sim || sim.over) return;
+  if (sim.weaves?.length) {
+    sim.weaves = sim.weaves.filter(item => item.until > (sim.time || 0)).slice(-8);
+  }
   updateTraces(sim, dt);
   updateDream(sim);
   updateFlies(sim);

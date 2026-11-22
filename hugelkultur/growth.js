@@ -1,7 +1,7 @@
-import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain } from './world.js?v=fifty';
-import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=fifty';
-import { seasonOf, seasonLength, idolDepth } from './water.js?v=fifty';
-import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf } from './clearing.js?v=fifty';
+import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain } from './world.js?v=hold';
+import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=hold';
+import { seasonOf, seasonLength, idolDepth } from './water.js?v=hold';
+import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf } from './clearing.js?v=hold';
 
 const MOSS = { width: 0.045, color: INK.lush, density: 2, emissive: false, depth: true };
 const DEEP = { width: 0.04, color: INK.deep, density: 2, emissive: false, depth: true };
@@ -298,7 +298,7 @@ export function settleMounds(sim) {
   if (!ready.length) return 0;
   for (const cell of ready) settleOne(sim, cell);
   if (!sim.quiet && sim.motions) {
-    ready.forEach((cell, index) => {
+    ready.slice(0, 12).forEach((cell, index) => {
       sim.motions.push({
         kind: 'dust',
         t: -index * 0.4,

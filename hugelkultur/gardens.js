@@ -1,5 +1,5 @@
-import { floraById } from './species.js?v=fifty';
-import { wornMeasures, seasonFit } from './clearing.js?v=fifty';
+import { floraById } from './species.js?v=hold';
+import { wornMeasures, seasonFit } from './clearing.js?v=hold';
 
 const SEASON_ID = ['SPR', 'SUM', 'AUT', 'WIN'];
 

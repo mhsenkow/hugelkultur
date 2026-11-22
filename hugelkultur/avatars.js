@@ -1,4 +1,4 @@
-import { cellCenter, walkHeight, cellAt, PALETTE, STIPPLE } from './world.js?v=fifty';
+import { cellCenter, walkHeight, cellAt, PALETTE, STIPPLE } from './world.js?v=hold';
 
 // One druid, seven bodies. A body is fat gaussian puffs, plus a few loose kernels that never quite join.
 

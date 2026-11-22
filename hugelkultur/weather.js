@@ -1,9 +1,9 @@
-import { GRID, ORIGIN, hash, cellAt, walkHeight, bedHeight } from './world.js?v=fifty';
-import { nightAmount } from './day.js?v=fifty';
-import { seasonOf } from './water.js?v=fifty';
-import { beginMound } from './growth.js?v=fifty';
-import { OPEN_CROWN } from './clearing.js?v=fifty';
-import { paintLeaf, paintFlake } from './gardens.js?v=fifty';
+import { GRID, ORIGIN, hash, cellAt, walkHeight, bedHeight } from './world.js?v=hold';
+import { nightAmount } from './day.js?v=hold';
+import { seasonOf } from './water.js?v=hold';
+import { beginMound } from './growth.js?v=hold';
+import { OPEN_CROWN } from './clearing.js?v=hold';
+import { paintLeaf, paintFlake } from './gardens.js?v=hold';
 
 const RAIN = { width: 0.018, color: 12, density: 1.6, emissive: false, depth: true };
 const STAIN = { width: 0.08, color: 11, density: 2.2, emissive: false, depth: true };
@@ -50,7 +50,7 @@ function driftSnow(sim, dt) {
     const dist = Math.hypot(cell.i - sim.hearth.i, cell.k - sim.hearth.k);
     const west = 1 - cell.i / Math.max(1, GRID - 1);
     const gain = dt * 0.0026 * (0.28 + west) * (dist < 2.15 ? 0.2 : 1);
-    const before = cell.snow || 0;
+    const before = qty(cell.snow);
     const add = Math.min(Math.max(0, room - before), gain);
     cell.snow = before + add;
     moved += add;
@@ -60,7 +60,7 @@ function driftSnow(sim, dt) {
   into.fill(-1);
   for (let index = 0; index < sim.cells.length; index++) {
     const cell = sim.cells[index];
-    if (!cell || cell.hearth || (cell.snow || 0) < 0.12) continue;
+    if (!cell || cell.hearth || qty(cell.snow) < 0.12) continue;
     let best = -1;
     let bestScore = 0.06;
     const here = bedHeight(cell);
@@ -78,7 +78,7 @@ function driftSnow(sim, dt) {
       }
     }
     if (best < 0) continue;
-    const flow = Math.min(cell.snow * 0.28, dt * 0.055);
+    const flow = Math.min(qty(cell.snow) * 0.28, dt * 0.055);
     if (flow <= 0) continue;
     send[index] = flow;
     into[index] = best;
@@ -87,10 +87,10 @@ function driftSnow(sim, dt) {
     if (!send[index]) continue;
     const cell = sim.cells[index];
     const next = sim.cells[into[index]];
-    const flow = Math.min(cell.snow || 0, send[index]);
-    cell.snow -= flow;
+    const flow = Math.min(qty(cell.snow), send[index]);
+    cell.snow = qty(cell.snow) - flow;
     const room = snowRoom(sim, next);
-    next.snow = Math.min(room, (next.snow || 0) + flow);
+    next.snow = Math.min(room, qty(next.snow) + flow);
     moved += flow;
   }
   return moved;
@@ -102,8 +102,10 @@ function meltSnow(sim, dt) {
   let moved = 0;
   for (const cell of sim.cells) {
     cell.thaw = 0;
+    cell.snow = qty(cell.snow);
     if (pace <= 0 || !(cell.snow > 0)) continue;
     const lost = Math.min(cell.snow, dt * pace / (1 + cell.snow * 1.15));
+    if (!Number.isFinite(lost) || lost <= 0) continue;
     cell.snow -= lost;
     moved += lost;
     if (cell.hearth || lost <= 0) continue;
@@ -111,11 +113,12 @@ function meltSnow(sim, dt) {
     const intoSoil = Math.min(lost * 0.75, room);
     cell.moisture = Math.min(1, (cell.moisture || 0) + intoSoil);
     const leftover = lost - intoSoil;
-    if (leftover <= 0) continue;
+    if (!(leftover > 0)) continue;
     const dist = sim.hearth ? Math.hypot(cell.i - sim.hearth.i, cell.k - sim.hearth.k) : 9;
     if (dist < 2.35) continue;
     const shed = leftover * (0.16 / (1 + cell.snow));
-    cell.thaw = Math.min(0.02, shed / Math.max(dt, 1e-4));
+    const thaw = shed / Math.max(dt, 1e-4);
+    cell.thaw = Number.isFinite(thaw) ? Math.min(0.02, Math.max(0, thaw)) : 0;
   }
   return moved;
 }
@@ -127,24 +130,30 @@ function settleBit(sim, bit) {
   if (bit.kind === 'leaf') cell.litter = Math.min(1, (cell.litter || 0) + 0.18);
   else if (bit.kind === 'snow') {
     const room = snowRoom(sim, cell);
-    cell.snow = Math.min(room, (cell.snow || 0) + (room < 0.2 ? 0.004 : 0.008));
+    cell.snow = Math.min(room, qty(cell.snow) + (room < 0.2 ? 0.004 : 0.008));
   }
   else cell.moisture = Math.min(1, (cell.moisture || 0) + 0.06);
+}
+
+function qty(n) {
+  const value = Number(n);
+  return Number.isFinite(value) ? value : 0;
 }
 
 export function updateWeather(sim, dt) {
   if (sim.over) return;
   const kind = KIND[seasonOf(sim).id] || null;
+  if (!Array.isArray(sim.fall)) sim.fall = [];
   if (sim.weatherSeason !== sim.seasonIndex) {
     sim.weatherSeason = sim.seasonIndex;
     for (const cell of sim.cells) cell.soak = 0;
-    for (const bit of sim.fall || []) settleBit(sim, bit);
+    for (const bit of sim.fall) settleBit(sim, bit);
     sim.fall.length = 0;
     sim.fallAcc = 0;
     sim.bedDirty = true;
     sim.snowShift = 0;
   }
-  for (let n = (sim.fall?.length || 0) - 1; n >= 0; n--) {
+  for (let n = sim.fall.length - 1; n >= 0; n--) {
     if (sim.fall[n].kind === kind) continue;
     settleBit(sim, sim.fall[n]);
     sim.fall.splice(n, 1);
@@ -152,12 +161,15 @@ export function updateWeather(sim, dt) {
   if (kind) {
     const gust = sim.seasonTime < 5 ? 2.4 : 1;
     const rate = (kind === 'rain' ? 26 : kind === 'leaf' ? 11 : 16) * gust;
-    sim.fallAcc += dt * rate;
-    while (sim.fallAcc >= 1 && sim.fall.length < 64) {
+    sim.fallAcc = Math.min(64, qty(sim.fallAcc) + qty(dt) * rate);
+    let hops = 0;
+    while (sim.fallAcc >= 1 && sim.fall.length < 64 && hops < 64) {
       sim.fallAcc -= 1;
-      const i = Math.floor(hash(sim.time * 1000 + sim.fall.length * 17) * GRID);
-      const k = Math.floor(hash(sim.time * 1300 + sim.fall.length * 29) * GRID);
+      hops += 1;
+      const i = Math.min(GRID - 1, Math.floor(hash(sim.time * 1000 + sim.fall.length * 17) * GRID));
+      const k = Math.min(GRID - 1, Math.floor(hash(sim.time * 1300 + sim.fall.length * 29) * GRID));
       const cell = sim.cells[k * GRID + i];
+      if (!cell) continue;
       sim.fall.push({
         kind,
         x: cell.x + (hash(sim.fall.length * 3 + 1) - 0.5) * 0.8,
@@ -254,8 +266,10 @@ export function updateWeather(sim, dt) {
 }
 
 export function drawMemory(draw, sim) {
+  let n = 0;
   for (const cell of sim.cells) {
-    if ((cell.stain || 0) < 0.18) continue;
+    if ((cell.stain || 0) < 0.18 || n >= 28) continue;
+    n += 1;
     const y = cell.elevation + 0.03;
     const span = 0.12 + cell.stain * 0.16;
     draw.streak([cell.x - span, y, cell.z - span * 0.3], [cell.x + span * 0.4, y + 0.02, cell.z + span], { ...STAIN, width: 0.05 + cell.stain * 0.04 });

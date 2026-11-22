@@ -1,5 +1,5 @@
-import { cellCenter, cellAt } from './world.js?v=fifty';
-import { SPIRITS, spiritById } from './avatars.js?v=fifty';
+import { cellCenter, cellAt } from './world.js?v=hold';
+import { SPIRITS, spiritById } from './avatars.js?v=hold';
 
 export function createAvatar(B, KIT, sim) {
   const lane = cellCenter(8, 9).z;

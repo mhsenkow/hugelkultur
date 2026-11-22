@@ -1,24 +1,24 @@
 import { createRenderer } from '../webgl.mjs';
-import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=fifty';
-import { createAvatar, movement, wearSpirit } from './avatar.js?v=fifty';
-import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=fifty';
-import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=fifty';
-import { updateGrowth, drawGrowth, moundLine, seedSquirrels, shooSquirrel } from './growth.js?v=fifty';
-import { updateGardens } from './gardens.js?v=fifty';
-import { updateMotions, MOTIONS } from './motions.js?v=fifty';
-import { updateSigns } from './signs.js?v=fifty';
-import { updateWeather } from './weather.js?v=fifty';
-import { updateDay, nightAmount, dayPart } from './day.js?v=fifty';
-import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=fifty';
-import { steer } from './guide.js?v=fifty';
+import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=hold';
+import { createAvatar, movement, wearSpirit } from './avatar.js?v=hold';
+import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=hold';
+import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=hold';
+import { updateGrowth, drawGrowth, moundLine, seedSquirrels, shooSquirrel } from './growth.js?v=hold';
+import { updateGardens } from './gardens.js?v=hold';
+import { updateMotions, MOTIONS } from './motions.js?v=hold';
+import { updateSigns } from './signs.js?v=hold';
+import { updateWeather } from './weather.js?v=hold';
+import { updateDay, nightAmount, dayPart } from './day.js?v=hold';
+import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=hold';
+import { steer } from './guide.js?v=hold';
 import {
   wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS,
   loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
   EDGE_NAME, compassName, liftCap, buried, groundLine
-} from './clearing.js?v=fifty';
-import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=fifty';
-import { FLORA, floraById } from './species.js?v=fifty';
-import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=fifty';
+} from './clearing.js?v=hold';
+import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=hold';
+import { FLORA, floraById } from './species.js?v=hold';
+import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=hold';
 
 const canvas = document.querySelector('#view');
 const seasonLabel = document.querySelector('#season-label');
@@ -225,15 +225,27 @@ function artSize() {
 }
 
 let floodDrone = null;
+let dronePitch = 0;
+let toneBurst = 0;
+
+function ensureAudio() {
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) return null;
+  audioCtx ??= new Context();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
 
 function playPhrase(freqs, dur, kind, volume) {
-  const now = audioCtx.currentTime;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
   const step = dur / Math.max(1, freqs.length);
   freqs.forEach((freq, index) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain.connect(ctx.destination);
     osc.type = kind;
     const start = now + index * step * 0.72;
     osc.frequency.setValueAtTime(freq, start);
@@ -248,11 +260,9 @@ function playPhrase(freqs, dur, kind, volume) {
 }
 
 function tone(type) {
-  if (!audioEnabled) return;
-  const Context = window.AudioContext || window.webkitAudioContext;
-  if (!Context) return;
-  audioCtx ??= new Context();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!audioEnabled || toneBurst > 6) return;
+  if (!ensureAudio()) return;
+  toneBurst += 1;
   const notes = {
     place: { freqs: [220, 146], dur: 0.08, kind: 'triangle', volume: 0.06 },
     maple: { freqs: [146, 196], dur: 0.09, kind: 'triangle', volume: 0.06 },
@@ -271,22 +281,30 @@ function tone(type) {
     open: { freqs: [392, 330, 262], dur: 0.55, kind: 'sine', volume: 0.03 }
   };
   const row = notes[type] || notes.place;
-  playPhrase(row.freqs, row.dur, row.kind, row.volume);
+  try {
+    playPhrase(row.freqs, row.dur, row.kind, row.volume);
+  } catch {
+    /* a missed note is not a freeze */
+  }
 }
 
 function stopDrone() {
-  if (!floodDrone || !audioCtx) {
-    floodDrone = null;
+  if (!floodDrone) {
+    dronePitch = 0;
     return;
   }
-  const now = audioCtx.currentTime;
   try {
-    floodDrone.gain.gain.linearRampToValueAtTime(0.0001, now + 0.18);
-    floodDrone.osc.stop(now + 0.22);
+    if (audioCtx) {
+      const now = audioCtx.currentTime;
+      floodDrone.gain.gain.cancelScheduledValues(now);
+      floodDrone.gain.gain.setValueAtTime(0.0001, now);
+      floodDrone.osc.stop(now + 0.05);
+    }
   } catch {
     /* already stopped */
   }
   floodDrone = null;
+  dronePitch = 0;
 }
 
 function keepDrone(stage) {
@@ -294,28 +312,41 @@ function keepDrone(stage) {
     stopDrone();
     return;
   }
-  const pitch = { hem: 46, drinks: 58, under: 72 }[stage];
-  if (!pitch) {
+  const pitch = { hem: 46, drinks: 58, under: 72 }[stage] || 0;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  try {
+    if (!pitch) {
+      if (!floodDrone || dronePitch === 0) return;
+      floodDrone.gain.gain.cancelScheduledValues(now);
+      floodDrone.gain.gain.setTargetAtTime(0.0001, now, 0.08);
+      dronePitch = 0;
+      return;
+    }
+    if (!floodDrone) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = pitch;
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      floodDrone = { osc, gain };
+      gain.gain.setTargetAtTime(0.018, now, 0.05);
+      dronePitch = pitch;
+      return;
+    }
+    if (dronePitch === pitch) return;
+    floodDrone.osc.frequency.cancelScheduledValues(now);
+    floodDrone.osc.frequency.setTargetAtTime(pitch, now, 0.28);
+    floodDrone.gain.gain.cancelScheduledValues(now);
+    floodDrone.gain.gain.setTargetAtTime(0.018, now, 0.08);
+    dronePitch = pitch;
+  } catch {
     stopDrone();
-    return;
   }
-  const Context = window.AudioContext || window.webkitAudioContext;
-  if (!Context) return;
-  audioCtx ??= new Context();
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-  if (!floodDrone) {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = pitch;
-    gain.gain.value = 0.018;
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-    osc.start();
-    floodDrone = { osc, gain };
-    return;
-  }
-  floodDrone.osc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.28);
 }
 
 function say(text) {
@@ -323,6 +354,8 @@ function say(text) {
 }
 
 function drainEvents() {
+  if (!sim?.events) return;
+  if (sim.events.length > 48) sim.events.splice(0, sim.events.length - 48);
   let line = null;
   let answer = null;
   const voiced = new Set(['year', 'season', 'flood', 'stone', 'fall', 'rot', 'plant', 'sow', 'fern', 'glade', 'nut', 'squirrel', 'ground', 'circle', 'eat', 'idol']);
@@ -411,11 +444,13 @@ function paintHud() {
   const read = document.querySelector('#end-read');
   if (read) {
     const last = lines.slice(-3);
-    read.replaceChildren(...last.map(text => {
-      const item = document.createElement('li');
-      item.textContent = text;
-      return item;
-    }));
+    if (read.childElementCount !== last.length || [...read.children].some((item, i) => item.textContent !== last[i])) {
+      read.replaceChildren(...last.map(text => {
+        const item = document.createElement('li');
+        item.textContent = text;
+        return item;
+      }));
+    }
   }
   end.hidden = false;
 }
@@ -771,79 +806,89 @@ function aim(dt) {
 }
 
 function frame(now) {
-  applyLook();
-  if (sim) sim.viewYaw = yaw;
+  toneBurst = 0;
   const dt = Math.min(0.05, last ? (now - last) / 1000 : 1 / 60);
   last = now;
-  aim(dt);
-  let step = dt;
-  if (focus) {
-    sim.attention = (sim.attention || 0) + dt;
-    sim.gazeCell = gazeOf(focus);
-    if (sim.attention > 0.55) {
-      if (!sim.watched) {
-        sim.watched = true;
-        sim.events.push({ type: 'note', text: 'You watched.' });
-      }
-      step *= 0.64;
-    }
-  } else {
-    sim.attention = 0;
-    sim.watched = false;
-    sim.gazeCell = null;
-  }
-  const rate = Math.min(100, Math.max(1, sim.speed || 1));
-  sim.fast = rate >= 8;
-  const driving = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].some(code => keys.has(code));
-  if (driving && !sim.walking) {
-    sim.walking = true;
-    sim.events.push({ type: 'note', text: 'You walk.' });
-  } else if (!driving && sim.walking) {
-    sim.walking = false;
-    sim.events.push({ type: 'note', text: 'She goes on.' });
-  }
-  if (!sim.over) {
-    let budget = step * rate;
-    let hops = 0;
-    while (budget > 0.0001 && hops < 16 && !sim.over) {
-      const bit = Math.min(0.4, budget);
-      updateDay(sim, bit, driving);
-      const auto = steer(sim, bit, driving);
-      const input = driving ? movement(keys, yaw) : (auto || { move: 0, mz: 0 });
-      let paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : { ...input };
-      if (sim.carrying && sim.carryKind === 'oak') {
-        paced.move = (paced.move || 0) * 0.92;
-        paced.mz = (paced.mz || 0) * 0.92;
-      }
-      sim.character.update(bit, paced, sim.time);
-      updateSticks(sim, bit);
-      updateGrowth(sim, bit);
-      updateGardens(sim, bit, driving);
-      updateWeather(sim, bit);
-      updateMotions(sim, bit);
-      updateSigns(sim, bit);
-      updateWater(sim, bit);
-      sim.stage.update(bit, sim.time);
-      sim.time += bit;
-      budget -= bit;
-      hops += 1;
-    }
-    if (sim.time - (sim.savedAt || 0) > Math.max(5, rate * 2)) {
-      sim.savedAt = sim.time;
-      writeForest(sim, forestSeed);
-    }
-  } else {
-    sim.stage.update(dt, sim.time);
-    if (driving) {
-      const input = movement(keys, yaw);
-      sim.character.update(dt, input, sim.time);
-      sim.time += dt;
-    }
-  }
-  drainEvents();
-  paintHud();
-  const size = artSize();
   try {
+    applyLook();
+    if (sim) sim.viewYaw = yaw;
+    aim(dt);
+    let step = dt;
+    if (focus) {
+      sim.attention = (sim.attention || 0) + dt;
+      sim.gazeCell = gazeOf(focus);
+      if (sim.attention > 0.55) {
+        if (!sim.watched) {
+          sim.watched = true;
+          sim.events.push({ type: 'note', text: 'You watched.' });
+        }
+        step *= 0.64;
+      }
+    } else {
+      sim.attention = 0;
+      sim.watched = false;
+      sim.gazeCell = null;
+    }
+    const rate = Math.min(100, Math.max(1, sim.speed || 1));
+    sim.fast = rate >= 8;
+    const driving = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].some(code => keys.has(code));
+    if (driving && !sim.walking) {
+      sim.walking = true;
+      sim.events.push({ type: 'note', text: 'You walk.' });
+    } else if (!driving && sim.walking) {
+      sim.walking = false;
+      sim.events.push({ type: 'note', text: 'She goes on.' });
+    }
+    if (!sim.over) {
+      let budget = step * rate;
+      let hops = 0;
+      while (budget > 0.0001 && hops < 16 && !sim.over) {
+        const bit = Math.min(0.4, budget);
+        updateDay(sim, bit, driving);
+        const auto = steer(sim, bit, driving);
+        const input = driving ? movement(keys, yaw) : (auto || { move: 0, mz: 0 });
+        let paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : { ...input };
+        if (sim.carrying && sim.carryKind === 'oak') {
+          paced.move = (paced.move || 0) * 0.92;
+          paced.mz = (paced.mz || 0) * 0.92;
+        }
+        sim.character.update(bit, paced, sim.time);
+        updateSticks(sim, bit);
+        updateGrowth(sim, bit);
+        updateGardens(sim, bit, driving);
+        updateWeather(sim, bit);
+        updateMotions(sim, bit);
+        updateSigns(sim, bit);
+        updateWater(sim, bit);
+        sim.stage.update(bit, sim.time);
+        sim.time += bit;
+        budget -= bit;
+        hops += 1;
+      }
+      if (sim.time - (sim.savedAt || 0) > Math.max(5, rate * 2)) {
+        sim.savedAt = sim.time;
+        writeForest(sim, forestSeed);
+      }
+    } else {
+      sim.stage.update(dt, sim.time);
+      if (driving) {
+        const input = movement(keys, yaw);
+        sim.character.update(dt, input, sim.time);
+        sim.time += dt;
+      }
+    }
+  } catch (error) {
+    if (sim?.events) sim.events.length = 0;
+    say(error instanceof Error ? error.message : String(error));
+  }
+  try {
+    drainEvents();
+    paintHud();
+  } catch (error) {
+    say(error instanceof Error ? error.message : String(error));
+  }
+  try {
+    const size = artSize();
     renderer.render(sim.world, {
       width: size.width,
       height: size.height,
@@ -861,10 +906,13 @@ function frame(now) {
     first = false;
   } catch (error) {
     say(error instanceof Error ? error.message : String(error));
-    return;
   }
-  renderSpecimen(dt);
-  renderSpirit(dt);
+  try {
+    renderSpecimen(dt);
+    renderSpirit(dt);
+  } catch {
+    /* the library can wait */
+  }
   requestAnimationFrame(frame);
 }
 

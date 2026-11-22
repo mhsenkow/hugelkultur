@@ -23,6 +23,8 @@ test('clearing rules', async () => {
   assert.equal(rules.idolLabel(rules.idolStage(0)), 'idol dry');
   assert.equal(rules.idolLabel(rules.idolStage(0.012)), 'at the hem');
   assert.equal(rules.idolLabel(rules.idolStage(0.03)), 'idol drinks');
+  assert.equal(rules.idolStage(Number.NaN), 'dry');
+  assert.equal(rules.idolStage(Infinity), 'dry');
   assert.equal(rules.yearTitle({ circle: true }), 'The year the circle held.');
   assert.equal(rules.yearTitle({ wood: 'willow', edge: 'N' }), 'The year the willow took the north gate.');
   assert.equal(rules.yearTitle({ berms: 3 }), 'The year the mounds kept the figure.');

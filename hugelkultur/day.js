@@ -1,5 +1,5 @@
-import { GRID, HEARTH_I, HEARTH_K, cellAt, hash, walkHeight } from './world.js?v=fifty';
-import { SPIRITS, spiritById } from './avatars.js?v=fifty';
+import { GRID, HEARTH_I, HEARTH_K, cellAt, hash, walkHeight } from './world.js?v=hold';
+import { SPIRITS, spiritById } from './avatars.js?v=hold';
 
 // A day is long enough to watch the work. Night is long enough to see them rest.
 // Sleep puts the worn body back on open ground, so a tower or a closed corner ends at dawn.
