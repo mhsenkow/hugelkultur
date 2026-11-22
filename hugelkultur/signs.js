@@ -1,6 +1,6 @@
 import { INK, GRID, ORIGIN, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, hash, cellAt, bedHeight, walkHeight } from './world.js?v=hold';
 import { seasonOf, seasonLength, idolDepth, OPPOSITE } from './water.js?v=hold';
-import { idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants } from './clearing.js?v=hold';
+import { idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants, roomsOf, woodOf } from './clearing.js?v=hold';
 import { nightAmount, dayIndex } from './day.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -46,9 +46,21 @@ export function updateSigns(sim, dt) {
   if (sim.weaves?.length) {
     sim.weaves = sim.weaves.filter(item => item.until > (sim.time || 0)).slice(-8);
   }
+  updateRooms(sim);
   updateTraces(sim, dt);
   updateDream(sim);
   updateFlies(sim);
+}
+
+function updateRooms(sim) {
+  const rooms = roomsOf(sim.cells, HEARTH_I, HEARTH_K, PAD);
+  const count = rooms.length;
+  if ((sim.roomCount || 0) < count && count > 0) {
+    if (sim.chronicle) sim.chronicle.room = true;
+    if (!sim.quiet) sim.events.push({ type: 'note', text: 'The wall makes a room.' });
+  }
+  sim.roomCount = count;
+  sim.rooms = rooms;
 }
 
 function updateTraces(sim, dt) {
@@ -141,6 +153,10 @@ export function drawSigns(draw, sim) {
   drawCourtDamp(draw, sim);
   drawMouths(draw, sim);
   drawOldGates(draw, sim);
+  drawOutlets(draw, sim);
+  drawRaces(draw, sim);
+  drawStore(draw, sim);
+  drawWorn(draw, sim);
   drawSummerMemory(draw, sim);
   drawFrost(draw, sim);
   drawThaw(draw, sim);
@@ -155,6 +171,84 @@ export function drawSigns(draw, sim) {
   drawPocket(draw, sim);
   drawFlies(draw, sim);
   drawStrata(draw, sim);
+}
+
+function drawOutlets(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.outlet || n >= 8) continue;
+    n += 1;
+    const y = cell.elevation + 0.04;
+    const out = cell.k === 0 ? [0, -1] : cell.k === GRID - 1 ? [0, 1] : cell.i === 0 ? [-1, 0] : [1, 0];
+    draw.streak(
+      [cell.x, y, cell.z],
+      [cell.x + out[0] * 0.22, y + 0.01, cell.z + out[1] * 0.22],
+      stroke(12, 0.035, { density: 1.5 })
+    );
+  }
+}
+
+function drawRaces(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if ((!cell.race && !cell.river) || n >= 36) continue;
+    n += 1;
+    const y = cell.elevation + 0.03;
+    const ink = cell.river ? INK.sand : 12;
+    draw.streak(
+      [cell.x - 0.18, y, cell.z - 0.04],
+      [cell.x + 0.16, y + 0.01, cell.z + 0.06],
+      stroke(ink, cell.river ? 0.05 : 0.03, { density: 1.6 })
+    );
+    if (cell.river) {
+      draw.streak(
+        [cell.x - 0.06, y + 0.02, cell.z - 0.18],
+        [cell.x + 0.08, y + 0.03, cell.z + 0.16],
+        stroke(INK.humus, 0.028, { density: 1.7 })
+      );
+    }
+  }
+}
+
+function drawStore(draw, sim) {
+  if (!sim.store) return;
+  const cell = sim.cells[sim.store.k * GRID + sim.store.i];
+  if (!cell) return;
+  const sticks = sim.store.sticks || [];
+  const y = walkHeight(cell) + 0.06;
+  sticks.slice(0, 8).forEach((kind, index) => {
+    const wood = woodOf(kind);
+    const along = index % 2 === 0;
+    const lift = Math.floor(index / 2) * 0.05;
+    if (along) {
+      draw.streak(
+        [cell.x - wood.half * 0.7, y + lift, cell.z - 0.04],
+        [cell.x + wood.half * 0.7, y + lift + 0.01, cell.z + 0.04],
+        stroke(wood.color, 0.045)
+      );
+    } else {
+      draw.streak(
+        [cell.x - 0.04, y + lift, cell.z - wood.half * 0.7],
+        [cell.x + 0.04, y + lift + 0.01, cell.z + wood.half * 0.7],
+        stroke(wood.color, 0.045)
+      );
+    }
+  });
+}
+
+function drawWorn(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if ((cell.worn || 0) < 0.45 || cell.hearth || n >= 28) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.02;
+    const span = 0.1 + Math.min(0.2, cell.worn * 0.1);
+    draw.streak(
+      [cell.x - span, y, cell.z - span * 0.2],
+      [cell.x + span, y + 0.01, cell.z + span * 0.15],
+      stroke(INK.sand, 0.05, { density: 1.8 })
+    );
+  }
 }
 
 function drawCircleThread(draw, sim) {
@@ -615,7 +709,7 @@ export function drawIdolLife(draw, sim) {
     );
   }
 
-  const leaves = Math.min(8, Math.max(0, (sim.year || 1) - 1));
+  const leaves = Math.min(8, Math.max(0, sim.yearLeaves ?? ((sim.year || 1) - 1)));
   for (let i = 0; i < leaves; i++) {
     const t = i / 8;
     const a = i * 0.95;

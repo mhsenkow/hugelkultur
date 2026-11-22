@@ -220,9 +220,12 @@ export function bedHeight(cell) {
   if (raft) height += Math.min(0.22, raft * 0.1);
   const sill = finite(cell.sill);
   if (sill) height += sill;
+  if (cell.sluice === 'shut') height += 1.2;
+  if (cell.jam) height += 0.3;
   // A drift is a soft crust. It eases the water aside and it does not lift the lake.
   const snow = finite(cell.snow);
   if (!cell.hearth && snow > 0.08) height += Math.min(snow, 1.2) * 0.07;
+  if (cell.ice && !cell.hearth) height += 0.08;
   return Number.isFinite(height) ? height : floor;
 }
 

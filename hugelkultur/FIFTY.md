@@ -20,7 +20,7 @@ made them, and years that become ground. Every item below should make the metaph
   `speak()`. When in doubt, say less.
 - **Draw with what exists.** Overlays go through the frame-splat draw callbacks
   (`draw.streak`, `draw.point`, `draw.model`) inside `createStickSystem`'s paint list.
-  The frame budget is `CAPACITY = 7200` splats in `sticks.js` — raise it only if an
+  The frame budget is `CAPACITY = 8400` splats in `sticks.js` — raise it only if an
   item needs it, and never past 9000. Baked geometry (the idol, terrain) is sculpted
   once in `world.js`; prefer overlays to re-baking.
 - **Respect the solver caps.** `PRESSURE_CAP`, rain ≤ 8 per cell, terrain under the

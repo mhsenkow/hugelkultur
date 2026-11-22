@@ -61,7 +61,11 @@ function placeScore(sim, cell, row) {
   const onLeak = sim._leak && cell.i === sim._leak.i && cell.k === sim._leak.k;
   const lip = !gate && !onLeak && dist < COURT;
   const temple = dist >= COURT && dist < 4.8;
-  if (!gate && !inRing && !wading && !onLeak) return -1e9;
+  let raceSide = false;
+  for (const index of neighbors(cell)) {
+    if (sim.cells[index]?.race) raceSide = true;
+  }
+  if (!gate && !inRing && !wading && !onLeak && !raceSide) return -1e9;
   let knit = 0;
   for (const index of neighbors(cell)) knit += Math.min(sim.cells[index].layers || 0, 2) + (sim.cells[index].berm ? 1 : 0);
   knit = Math.min(knit, 4) / 4;
@@ -83,6 +87,7 @@ function placeScore(sim, cell, row) {
     + (temple ? 1.8 : 0)
     + (lip ? -3.2 : 0)
     + (onLeak ? 24 : 0)
+    + (raceSide ? 3.4 : 0)
     + watched * 2
     + errand
     + dryNeed * 2.2 * row.fit
@@ -276,13 +281,15 @@ function woodLeft(sim) {
   return (sim.loose || []).some(stick => !stick.fall);
 }
 
-const BLOCKS = ['dam', 'raise', 'root', 'knit', 'divert', 'wood', 'stair'];
+const BLOCKS = ['dam', 'raise', 'root', 'knit', 'divert', 'race', 'store', 'wood', 'stair'];
 const BLOCK_LINE = {
   dam: 'You dam the gap.',
   raise: 'You raise what holds.',
   root: 'You root the mouth.',
   knit: 'You knit the gap.',
   divert: 'You turn the water aside.',
+  race: 'You give the water a road.',
+  store: 'You keep wood for winter.',
   wood: 'You go for wood.',
   stair: 'You lay a step.'
 };
@@ -460,6 +467,107 @@ function nextCut(sim) {
   return null;
 }
 
+function racePath(sim) {
+  const hand = seasonFinger(sim);
+  if (!hand) return [];
+  const mouth = sim.cells[hand.mouth[1] * GRID + hand.mouth[0]];
+  if (!mouth) return [];
+  const gate = sim.cells[hand.gate[1] * GRID + hand.gate[0]];
+  const held = gate && holdsWater(gate);
+  if (!held) return [];
+  const start = mouth.k * GRID + mouth.i;
+  const seen = new Uint8Array(sim.cells.length);
+  const prev = new Int16Array(sim.cells.length);
+  prev.fill(-1);
+  const queue = [start];
+  seen[start] = 1;
+  let end = -1;
+  for (let head = 0; head < queue.length; head++) {
+    const at = queue[head];
+    const cell = sim.cells[at];
+    const onEdge = cell.i === 0 || cell.k === 0 || cell.i === GRID - 1 || cell.k === GRID - 1;
+    const mouthEdge = hand.edge === 'N' ? cell.k === 0
+      : hand.edge === 'S' ? cell.k === GRID - 1
+      : hand.edge === 'W' ? cell.i === 0
+        : cell.i === GRID - 1;
+    if (onEdge && !mouthEdge && Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) >= 4) {
+      end = at;
+      break;
+    }
+    for (const index of neighbors(cell)) {
+      if (seen[index]) continue;
+      const next = sim.cells[index];
+      if (!next || next.hearth || next.tree) continue;
+      if (Math.hypot(next.i - HEARTH_I, next.k - HEARTH_K) < 4) continue;
+      seen[index] = 1;
+      prev[index] = at;
+      queue.push(index);
+    }
+  }
+  if (end < 0) return [];
+  const path = [];
+  let cursor = end;
+  let depth = 0;
+  while (cursor !== -1) {
+    const cell = sim.cells[cursor];
+    path.push({ cell, sill: -0.35 - depth * 0.04 });
+    depth += 1;
+    if (cursor === start) break;
+    cursor = prev[cursor];
+  }
+  return path.reverse();
+}
+
+function nextRace(sim) {
+  for (const step of racePath(sim)) {
+    if (skipped(sim, keyOf(step.cell.i, step.cell.k))) continue;
+    if ((step.cell.sill || 0) > step.sill + 0.04 || !step.cell.race) return step;
+  }
+  return null;
+}
+
+function pickStore(sim) {
+  if (sim.store?.i != null) {
+    const cell = sim.cells[sim.store.k * GRID + sim.store.i];
+    if (cell) return cell;
+  }
+  let best = null;
+  let score = -1e9;
+  for (const cell of sim.cells) {
+    if (!openSoil(cell) && !cell.store) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist <= COURT || dist >= 5.2) continue;
+    const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+    if (depth > 0.03) continue;
+    const value = 4 - Math.abs(dist - 3.4) - depth * 4;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  if (!best) return null;
+  best.store = true;
+  sim.store = { i: best.i, k: best.k, sticks: sim.store?.sticks || [] };
+  return best;
+}
+
+function storeGoal(sim, row) {
+  const season = seasonOf(sim).id;
+  const pile = pickStore(sim);
+  if (!pile) return null;
+  sim.store = sim.store || { i: pile.i, k: pile.k, sticks: [] };
+  const sticks = sim.store.sticks || [];
+  if (season === 'AUT' && (sim.loose || []).filter(item => !item.fall).length > 6 && sticks.length < 12) {
+    if (sim.carrying) return { kind: 'store', method: 'store', i: pile.i, k: pile.k };
+    const fetch = placeGoal(sim, row, 'store', pile);
+    if (fetch) return fetch;
+  }
+  if ((season === 'WIN' || season === 'SPR') && !sim.carrying && !woodLeft(sim) && sticks.length) {
+    return { kind: 'takeStore', method: 'store', i: pile.i, k: pile.k };
+  }
+  return null;
+}
+
 function methodGoal(sim, row, method) {
   if (method === 'dam') return placeGoal(sim, row, method, bestPlace(sim, row));
   if (method === 'raise') return placeGoal(sim, row, method, bestBerm(sim, row));
@@ -476,8 +584,18 @@ function methodGoal(sim, row, method) {
     if (!cut) return null;
     return { kind: 'cut', method, i: cut.cell.i, k: cut.cell.k, sill: cut.sill };
   }
+  if (method === 'race') {
+    if (sim.carrying) return null;
+    const cut = nextRace(sim);
+    if (!cut) return null;
+    return { kind: 'cut', method, race: true, i: cut.cell.i, k: cut.cell.k, sill: cut.sill };
+  }
+  if (method === 'store') return storeGoal(sim, row);
   if (method === 'wood') {
     if (sim.carrying || woodLeft(sim)) return null;
+    if ((sim.store?.sticks || []).length) {
+      return { kind: 'takeStore', method: 'wood', i: sim.store.i, k: sim.store.k };
+    }
     const tree = bestTree(sim, row);
     if (tree) return { kind: 'shake', method, x: tree.x, z: tree.z };
     if (seasonOf(sim).id === 'WIN') {
@@ -807,7 +925,7 @@ function chasePoint(sim, goal) {
     const stand = cell && standOn(sim, cell);
     return stand ? { x: stand.x, z: stand.z } : null;
   }
-  if (goal.kind === 'uncover' || goal.kind === 'cut') {
+  if (goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore') {
     const cell = sim.cells[goal.k * GRID + goal.i];
     return cell ? { x: cell.x, z: cell.z } : null;
   }
@@ -818,8 +936,9 @@ function chasePoint(sim, goal) {
 function abandon(sim, goal) {
   if (!goal) return;
   const until = sim.time + (goal.kind === 'eat' ? 12 : 8);
-  if (goal.kind === 'place' || goal.kind === 'uncover' || goal.kind === 'cut') sim.guide.skip.set(keyOf(goal.i, goal.k), until);
-  else if (goal.kind === 'eat' && goal.id != null) sim.guide.skip.set(`eat:${goal.id}`, until);
+  if (goal.kind === 'place' || goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore') {
+    sim.guide.skip.set(keyOf(goal.i, goal.k), until);
+  } else if (goal.kind === 'eat' && goal.id != null) sim.guide.skip.set(`eat:${goal.id}`, until);
   else if (goal.kind === 'fetch') sim.guide.skip.set(`fetch:${Math.round(goal.x * 2)},${Math.round(goal.z * 2)}`, until);
   else if (goal.kind === 'shake') sim.guide.skip.set(`shake:${Math.round(goal.x)},${Math.round(goal.z)}`, sim.time + 6);
   else if (goal.kind === 'attend' && goal.tree) sim.guide.skip.set(`attend:${goal.tree.i},${goal.tree.k}`, sim.time + 16);
@@ -919,7 +1038,12 @@ function goalHolds(sim) {
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell || cell.hearth || cell.tree) return false;
     if ((sim.guide.skip.get(keyOf(cell.i, cell.k)) || 0) > sim.time) return false;
+    if (goal.race && !cell.race) return true;
     return (cell.sill || 0) > goal.sill + 0.04;
+  }
+  if (goal.kind === 'store') return Boolean(sim.carrying && sim.store);
+  if (goal.kind === 'takeStore') {
+    return !sim.carrying && (sim.store?.sticks || []).length > 0;
   }
   if (goal.kind === 'rest') return Boolean(sim.holding) && !sim.carrying;
   if (goal.kind === 'shake') return !sim.carrying && sim.loose.length < 10;
@@ -1002,7 +1126,40 @@ export function steer(sim, dt, playerDriving) {
     if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55) {
       cell.sill = goal.sill;
       cell.stain = Math.min(1, (cell.stain || 0) + 0.45);
+      if (goal.race) {
+        cell.race = true;
+        cell.channel = true;
+      }
       sim.bedDirty = true;
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'store') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && sim.carrying) {
+      sim.store = sim.store || { i: cell.i, k: cell.k, sticks: [] };
+      if (sim.store.sticks.length < 12) {
+        sim.store.sticks.push(sim.carryKind || 'maple');
+        cell.store = true;
+        sim.carrying = false;
+        sim.carryKind = null;
+        sim.events.push({ type: 'note', text: 'You keep wood for winter.' });
+      }
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'takeStore') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && (sim.store?.sticks || []).length) {
+      sim.carryKind = sim.store.sticks.pop() || 'maple';
+      sim.carrying = true;
+      sim.events.push({ type: 'take', text: 'You take from the store.' });
       guide.goal = null;
       return { move: 0, mz: 0 };
     }

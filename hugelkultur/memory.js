@@ -1,6 +1,6 @@
 import { GRID, cellAt } from './world.js?v=hold';
 import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=hold';
-import { beginMound, raiseLand, settleMounds } from './growth.js?v=hold';
+import { beginMound, raiseLand, settleMounds, noteEra } from './growth.js?v=hold';
 import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js?v=hold';
 
 const FOREST_KEY = 'hugelkultur-forest';
@@ -15,7 +15,9 @@ function cellRow(cell) {
     || cell.lift || cell.raft || cell.rooted || cell.parched || cell.rock || cell.log || cell.stood
     || (cell.land || 0) > 0 || (cell.sunk || 0) > 0 || cell.nutAt || cell.cubes
     || (cell.litter || 0) > 0.2 || (cell.snow || 0) > 0.2
-    || (cell.moisture || 0) > 0.4 || cell.oldGate || cell.dam || cell.rockAge;
+    || (cell.moisture || 0) > 0.4 || cell.oldGate || cell.dam || cell.rockAge
+    || cell.outlet || cell.race || cell.river || cell.store || cell.scour || cell.silt
+    || cell.worn || cell.ice || cell.jam || cell.sluice || cell.hurdle || cell.lintel || cell.burrow;
   if (!lived) return null;
   return {
     i: cell.i,
@@ -52,7 +54,20 @@ function cellRow(cell) {
     knitted: !!cell.knitted,
     oldGate: !!cell.oldGate,
     dam: !!cell.dam,
-    rockAge: cell.rockAge || 0
+    rockAge: cell.rockAge || 0,
+    outlet: !!cell.outlet,
+    race: !!cell.race,
+    river: !!cell.river,
+    store: !!cell.store,
+    scour: cell.scour || 0,
+    silt: cell.silt || 0,
+    worn: cell.worn || 0,
+    ice: !!cell.ice,
+    jam: !!cell.jam,
+    sluice: cell.sluice || null,
+    hurdle: !!cell.hurdle,
+    lintel: !!cell.lintel,
+    burrow: cell.burrow || 0
   };
 }
 
@@ -117,6 +132,20 @@ export function snapshotForest(sim, seed) {
       sick: !!tree.sick,
       sickAt: tree.sickAt || 0
     })),
+    grove: sim.trees.filter(tree => !tree.planted).map(tree => ({
+      i: tree.i,
+      k: tree.k,
+      growth: tree.growth || 0,
+      baked: tree.baked || 2.2,
+      age: tree.age || 0,
+      aged: !!tree.aged,
+      fallen: !!tree.fallen,
+      rot: tree.rot || 0,
+      yaw: tree.yaw || 0,
+      sick: !!tree.sick,
+      sickAt: tree.sickAt || 0,
+      rooted: !!tree.rooted
+    })),
     stumps: sim.trees.filter(tree => !tree.planted && tree.fallen).map(tree => ({
       i: tree.i,
       k: tree.k,
@@ -137,7 +166,13 @@ export function snapshotForest(sim, seed) {
     flood: sim.flood || 0,
     years: sim.years || [],
     gates: sim.gates || 0,
-    taught: !!sim.taught
+    taught: !!sim.taught,
+    era: sim.era || 'glade',
+    heldYear: !!sim.heldYear,
+    store: sim.store ? { i: sim.store.i, k: sim.store.k, sticks: (sim.store.sticks || []).slice() } : null,
+    visited: sim.visited || {},
+    roomCount: sim.roomCount || 0,
+    yearLeaves: sim.yearLeaves ?? Math.max(0, (sim.year || 1) - 1)
   };
 }
 
@@ -222,8 +257,31 @@ export function applyForest(sim, saved) {
     cell.oldGate = !!row.oldGate;
     cell.dam = !!row.dam;
     cell.rockAge = row.rockAge || 0;
+    cell.outlet = !!row.outlet;
+    cell.race = !!row.race;
+    cell.river = !!row.river;
+    cell.store = !!row.store;
+    cell.scour = row.scour || 0;
+    cell.silt = row.silt || 0;
+    cell.worn = row.worn || 0;
+    cell.ice = !!row.ice;
+    cell.jam = !!row.jam;
+    cell.sluice = row.sluice || null;
+    cell.hurdle = !!row.hurdle;
+    cell.lintel = !!row.lintel;
+    cell.burrow = row.burrow || 0;
     if (row.tree) cell.tree = true;
   }
+  sim.era = saved.era || 'glade';
+  sim.heldYear = !!saved.heldYear;
+  sim.store = saved.store ? {
+    i: saved.store.i,
+    k: saved.store.k,
+    sticks: Array.isArray(saved.store.sticks) ? saved.store.sticks.slice() : []
+  } : null;
+  sim.visited = saved.visited && typeof saved.visited === 'object' ? { ...saved.visited } : {};
+  sim.roomCount = saved.roomCount || 0;
+  sim.yearLeaves = Number.isFinite(saved.yearLeaves) ? saved.yearLeaves : Math.max(0, (sim.year || 1) - 1);
   if (Array.isArray(saved.loose)) {
     sim.loose = saved.loose.map(stick => ({
       x: stick.x,
@@ -269,6 +327,27 @@ export function applyForest(sim, saved) {
   sim.husks = Array.isArray(saved.husks) ? saved.husks.slice(-12) : [];
   sim.weaves = Array.isArray(saved.weaves) ? saved.weaves.slice() : [];
   sim.seasonPeak = saved.seasonPeak || 'dry';
+  for (const row of saved.grove || []) {
+    const tree = sim.trees.find(item => !item.planted && item.i === row.i && item.k === row.k);
+    if (!tree) continue;
+    tree.baked = row.baked || 2.2;
+    tree.growth = Math.max(row.growth || 0, tree.baked);
+    tree.age = row.age || 0;
+    tree.aged = true;
+    tree.sick = !!row.sick;
+    tree.sickAt = row.sickAt || 0;
+    tree.rooted = !!row.rooted;
+    if (row.fallen) {
+      tree.fallen = true;
+      tree.rot = row.rot || 0;
+      tree.yaw = row.yaw || 0;
+      const cell = sim.cells[row.k * GRID + row.i];
+      if (cell) {
+        cell.tree = false;
+        cell.log = true;
+      }
+    }
+  }
   for (const stump of saved.stumps || []) {
     const tree = sim.trees.find(item => !item.planted && item.i === stump.i && item.k === stump.k);
     if (!tree) continue;
@@ -304,11 +383,12 @@ export function passSeason(sim) {
     }
   }
   for (const tree of sim.trees) {
-    if (!tree.planted || tree.fallen) continue;
+    if (tree.fallen) continue;
     const waited = seasonLength(sim);
+    if (!tree.planted && tree.baked == null) tree.baked = Math.max(2.2, tree.growth || 2.2);
     tree.growth = tree.group === 'plant'
       ? Math.min(1, (tree.growth || 0) + 0.2)
-      : growWood(tree.growth, waited, tree.group === 'shrub', tree.sick);
+      : growWood(tree.growth || (tree.planted ? 0.2 : tree.baked || 2.2), waited, tree.group === 'shrub', tree.sick);
     tree.age = (tree.age || 0) + waited;
     if ((tree.kind === 'alder' || tree.kind === 'willow') && tree.growth > 0.55) {
       const cell = sim.cells[tree.k * GRID + tree.i];
@@ -354,10 +434,44 @@ export function passSeason(sim) {
   sim.bedDirty = true;
 }
 
+export function passYear(sim) {
+  sim.quiet = true;
+  for (let n = 0; n < 4; n++) passSeason(sim);
+  for (const cell of sim.cells || []) {
+    if (cell.hearth || cell.clearing) continue;
+    if (cell.race || cell.channel) {
+      cell.scour = (cell.scour || 0) + 0.4;
+      if (cell.scour > 1) {
+        cell.scour = 0;
+        cell.sill = Math.max(-0.9, (cell.sill || 0) - 0.04);
+        cell.channel = true;
+        if ((cell.sill || 0) <= -0.45) cell.river = true;
+      }
+    }
+    if ((cell.sill || 0) <= -0.3 && (cell.i === 0 || cell.k === 0 || cell.i === GRID - 1 || cell.k === GRID - 1)) {
+      cell.outlet = true;
+    }
+    if ((cell.compost || 0) > 0.3) raiseLand(sim, cell, 0.008);
+  }
+  noteEra(sim);
+  sim.quiet = false;
+  sim.bedDirty = true;
+}
+
 export function catchUp(sim, ms) {
   if (!Number.isFinite(ms) || ms < 20000) return null;
   const seasons = Math.floor(ms / 1000 / 52);
   if (seasons < 1) return null;
+  if (seasons >= 8) {
+    const years = Math.min(8, Math.floor(seasons / 4));
+    for (let n = 0; n < years; n++) passYear(sim);
+    const held = !sim.over;
+    sim.events.push({
+      type: 'note',
+      text: held ? 'Years passed. The keep held.' : 'Years passed. The water found a way.'
+    });
+    return years * 4;
+  }
   const run = Math.min(4, seasons);
   for (let n = 0; n < run; n++) passSeason(sim);
   sim.events.push({ type: 'note', text: awayLine(run, seasons > 4) });

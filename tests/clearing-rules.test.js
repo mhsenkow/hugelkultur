@@ -28,6 +28,12 @@ test('clearing rules', async () => {
   assert.equal(rules.yearTitle({ circle: true }), 'The year the circle held.');
   assert.equal(rules.yearTitle({ wood: 'willow', edge: 'N' }), 'The year the willow took the north gate.');
   assert.equal(rules.yearTitle({ berms: 3 }), 'The year the mounds kept the figure.');
+  assert.equal(rules.yearTitle({ breach: true, drank: true }), 'The year the wall broke.');
+  assert.equal(rules.yearTitle({ room: true }), 'The year the wall made a room.');
+  assert.equal(rules.stops({ cubes: 2 }, 'people'), true);
+  assert.equal(rules.stops({ hurdle: true }, 'water'), false);
+  assert.equal(rules.eraOf({ cells: [], year: 1 }), 'glade');
+  assert.equal(rules.landCap('keep'), 1);
   assert.equal(rules.awayLine(1, false), 'A season passed.');
   assert.equal(rules.awayLine(6, true), 'A year kept going.');
   assert.equal(rules.YEAR_SPAN, 240);

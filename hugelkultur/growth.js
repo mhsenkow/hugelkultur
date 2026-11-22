@@ -1,7 +1,7 @@
-import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain } from './world.js?v=hold';
+import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain, crownFade } from './world.js?v=hold';
 import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=hold';
 import { seasonOf, seasonLength, idolDepth } from './water.js?v=hold';
-import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf } from './clearing.js?v=hold';
+import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf, eraOf, landCap, ERA_LINE } from './clearing.js?v=hold';
 
 const MOSS = { width: 0.045, color: INK.lush, density: 2, emissive: false, depth: true };
 const DEEP = { width: 0.04, color: INK.deep, density: 2, emissive: false, depth: true };
@@ -32,10 +32,24 @@ function speak(sim, type, text) {
 
 export function raiseLand(sim, cell, amount) {
   if (!cell || cell.hearth || !(amount > 0)) return;
-  const next = Math.min(0.42, (cell.land || 0) + amount);
+  const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+  const cap = dist <= COURT ? 0.42 : landCap(eraOf(sim));
+  const next = Math.min(cap, (cell.land || 0) + amount);
   if (next === (cell.land || 0)) return;
   cell.land = next;
   sim.bedDirty = true;
+}
+
+export function noteEra(sim) {
+  const next = eraOf(sim);
+  if (sim.era === next) return next;
+  const prev = sim.era || 'glade';
+  sim.era = next;
+  if (prev !== 'glade' || next !== 'glade') {
+    const line = ERA_LINE[next];
+    if (line && !sim.quiet) speak(sim, 'era', line);
+  }
+  return next;
 }
 
 export function compactMound(sim, cell) {
@@ -342,6 +356,13 @@ function putBrick(draw, cubes, cell, y, scaleY = 1) {
   return draw.model(model, [cell.x, y, cell.z], options);
 }
 
+function cutScale(sim, cell, h) {
+  if (h < BRICK * 1.2 || !sim.hearth) return 1;
+  const fade = crownFade(cell.x - sim.hearth.x, cell.z - sim.hearth.z, sim.viewYaw);
+  if (fade >= 0.62) return 1;
+  return 0.6;
+}
+
 function drawRises(draw, sim) {
   const cubes = sim.riseCubes;
   if (!cubes) return;
@@ -350,23 +371,35 @@ function drawRises(draw, sim) {
     const h = columnHeight(cell);
     if (h > 0.12) risen.push([cell, h]);
   }
-  risen.sort((a, b) => b[1] - a[1]);
-  let left = 72;
+  risen.sort((a, b) => {
+    const da = Math.hypot(a[0].i - HEARTH_I, a[0].k - HEARTH_K);
+    const db = Math.hypot(b[0].i - HEARTH_I, b[0].k - HEARTH_K);
+    return da - db || b[1] - a[1];
+  });
+  let left = 160;
   for (const [cell, h] of risen) {
     if (left <= 0) return;
-    if (h <= BRICK * 1.15) {
-      const scale = Math.min(1, Math.max(0.45, h / BRICK));
-      if (!putBrick(draw, cubes, cell, cell.elevation + h / 2, scale)) return;
+    const cut = cutScale(sim, cell, h);
+    const drawH = h * cut;
+    if (drawH <= BRICK * 1.15 || h > BRICK * 3) {
+      const scale = Math.min(1.8, Math.max(0.45, drawH / BRICK));
+      if (!putBrick(draw, cubes, cell, cell.elevation + drawH / 2, scale)) return;
       left -= 1;
+      if (cut < 1) {
+        const y = cell.elevation + drawH + 0.02;
+        draw.streak([cell.x - 0.2, y, cell.z - 0.2], [cell.x + 0.2, y, cell.z + 0.2], {
+          width: 0.03, color: INK.charcoal, density: 2.2, emissive: false, depth: true
+        });
+      }
       continue;
     }
-    const n = Math.min(6, Math.ceil(h / BRICK));
+    const n = Math.min(6, Math.ceil(drawH / BRICK));
     for (let i = 0; i < n - 1 && left > 0; i++) {
       if (!putBrick(draw, cubes, cell, cell.elevation + BRICK / 2 + i * BRICK)) return;
       left -= 1;
     }
     if (left <= 0) return;
-    if (!putBrick(draw, cubes, cell, cell.elevation + h - BRICK / 2)) return;
+    if (!putBrick(draw, cubes, cell, cell.elevation + drawH - BRICK / 2)) return;
     left -= 1;
   }
 }
@@ -541,6 +574,7 @@ function ageRelic(sim) {
 
 function openGround(sim, cell) {
   if (!cell || cell.hearth || cell.tree || cell.plot || cell.berm || cell.log || cell.nutAt || cell.channel) return false;
+  if ((cell.worn || 0) > 0.6) return false;
   if (Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) < PAD) return false;
   const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
   return depth < 0.06;

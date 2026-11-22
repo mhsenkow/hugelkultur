@@ -1,6 +1,6 @@
-import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=hold';
-import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice } from './clearing.js?v=hold';
-import { settleMounds } from './growth.js?v=hold';
+import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade, HEARTH_I, HEARTH_K } from './world.js?v=hold';
+import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice, eraOf } from './clearing.js?v=hold';
+import { settleMounds, noteEra, raiseLand } from './growth.js?v=hold';
 
 export const SEASON_LENGTH = 52;
 
@@ -164,7 +164,7 @@ export function sidleGate(sim, season) {
     const k = Math.max(0, Math.min(GRID - 1, Math.round(gk + pz * side * 1.5)));
     const cell = sim.cells[k * GRID + i];
     if (!cell || cell.hearth || cell.tree) continue;
-    const dist = Math.hypot(i - 8, k - 8);
+    const dist = Math.hypot(i - HEARTH_I, k - HEARTH_K);
     if (dist < 2.1) continue;
     const thick = thickness(sim, i, k);
     if (thick < bestThick) {
@@ -263,6 +263,7 @@ export function closeSeason(sim) {
   const rolled = sim.seasonIndex === 0;
   if (rolled) {
     sim.chronicle.berms = sim.berms || 0;
+    if (sim.holding || sim.circleSaid) sim.heldYear = true;
     sim.yearLine = yearTitle(sim.chronicle);
     noteYear(sim);
     if (!sim.quiet) sim.events.push({ type: 'year', text: sim.yearLine });
@@ -283,11 +284,67 @@ export function closeSeason(sim) {
     sim.year += 1;
     sim.chronicle = freshChronicle();
     revealGlade(sim);
+    noteEra(sim);
   }
   if (!sim.quiet) sim.events.push({ type: 'season', text: seasonOf(sim).line });
   if (rolled) settleMounds(sim);
   markMouth(sim);
   return finished;
+}
+
+function isEdge(cell) {
+  return cell.i === 0 || cell.k === 0 || cell.i === GRID - 1 || cell.k === GRID - 1;
+}
+
+function markOutlets(sim) {
+  for (const cell of sim.cells) {
+    if (cell.hearth || cell.clearing) continue;
+    if (!isEdge(cell)) continue;
+    if ((cell.sill || 0) > -0.3) continue;
+    if (cell.outlet) continue;
+    cell.outlet = true;
+    const edge = cell.k === 0 ? 'N' : cell.k === GRID - 1 ? 'S' : cell.i === 0 ? 'W' : 'E';
+    if (sim.chronicle) {
+      sim.chronicle.river = true;
+      sim.chronicle.edge = edge;
+    }
+    if (!sim.quiet && sim.saidOutlet !== edge) {
+      sim.saidOutlet = edge;
+      sim.events.push({ type: 'note', text: `The water leaves by the ${EDGE_NAME[edge]}.` });
+    }
+  }
+}
+
+function scourBed(sim, dt) {
+  if (!sim.snapshot?.sample || !(dt > 0)) return;
+  sim.scourWait = (sim.scourWait || 0) + dt;
+  if (sim.scourWait < 1) return;
+  sim.scourWait = 0;
+  for (const cell of sim.cells) {
+    if (cell.hearth || cell.clearing || cell.paved) continue;
+    const hit = sim.snapshot.sample(cell.x, cell.z);
+    if (!hit) continue;
+    const depth = hit.depth || 0;
+    const [vx, vz] = hit.velocity || [0, 0];
+    const speed = Math.hypot(vx, vz);
+    if (depth > 0.06 && speed < 0.01) {
+      cell.silt = (cell.silt || 0) + 0.08;
+      if (cell.silt > 1) {
+        cell.silt = 0;
+        raiseLand(sim, cell, 0.01);
+      }
+      continue;
+    }
+    if (speed < 0.03 || depth < 0.04 || cell.ice) continue;
+    const worn = cell.worn > 0.6 ? 0.5 : 1;
+    cell.scour = (cell.scour || 0) + speed * worn;
+    if (cell.scour < 1.2) continue;
+    cell.scour = 0;
+    cell.sill = Math.max(-0.9, (cell.sill || 0) - 0.04);
+    cell.channel = true;
+    if ((cell.sill || 0) <= -0.45) cell.river = true;
+    sim.bedDirty = true;
+  }
 }
 
 export function updateWater(sim, dt) {
@@ -310,15 +367,17 @@ export function updateWater(sim, dt) {
   }
   const current = seasonOf(sim);
   const leave = OPPOSITE[current.edge];
-  const press = pressureOf(sim.year, sim.measures?.climb);
-  const ease = 1 / (1 + Math.max(0, sim.year - 1) * Math.min(0.18, sim.measures?.climb ?? 0.22));
+  const era = eraOf(sim);
+  const press = pressureOf(sim.year, sim.measures?.climb, era);
+  const ease = 1 / (1 + Math.max(0, sim.year - 1) * Math.min(0.18, pressureOf(2, sim.measures?.climb, era) - 1 || 0.22));
+  const freshet = current.id === 'SPR' && (sim.seasonTime || 0) < 8 ? 1.8 : 1;
   const tick = Number.isFinite(dt) ? Math.max(0, Math.min(0.4, dt)) : 0;
   if (tick > 0) {
     try {
       sim.solver.step(tick, {
-        friction: current.friction,
+        friction: current.friction + (sim.cells.some(cell => cell.ice) ? 0.12 : 0),
         rain: (x, z) => {
-          let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press) : 0;
+          let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press * freshet) : 0;
           const thaw = Number(cellAt(sim.cells, x, z)?.thaw);
           if (Number.isFinite(thaw) && thaw > 0) rate += Math.min(0.02, thaw);
           return rateOf(rate);
@@ -326,6 +385,10 @@ export function updateWater(sim, dt) {
         drain: (x, z, _t, state) => {
           let rate = current.drain * ease;
           if (atMouth(sim.cells, x, z, leave)) rate += 0.04;
+          const cell = cellAt(sim.cells, x, z);
+          if (cell?.outlet) rate += 0.05;
+          if (current.id === 'SUM' && cell && !cell.channel && !cell.race) rate += 0.02;
+          if (current.id === 'SUM' && cell?.channel) rate *= 0.7;
           if (state.depth < 0.02) rate += 0.012;
           return rateOf(rate, 1e4);
         }
@@ -339,6 +402,21 @@ export function updateWater(sim, dt) {
   } catch {
     /* keep the last water that drew */
   }
+  markOutlets(sim);
+  scourBed(sim, tick);
+  if (current.id === 'WIN' && (sim.seasonTime || 0) > seasonLength(sim) * 0.1) {
+    for (const cell of sim.cells) {
+      const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+      if (depth > 0.04 && !cell.hearth) cell.ice = true;
+    }
+  } else if (current.id !== 'WIN') {
+    for (const cell of sim.cells) {
+      if (!cell.ice) continue;
+      cell.ice = false;
+      cell.thaw = Math.min(0.02, (cell.thaw || 0) + 0.015);
+    }
+  }
+  noteEra(sim);
 
   const depth = idolDepth(sim);
   const stage = idolStage(depth);

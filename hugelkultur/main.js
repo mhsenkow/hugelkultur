@@ -11,10 +11,11 @@ import { updateWeather } from './weather.js?v=hold';
 import { updateDay, nightAmount, dayPart } from './day.js?v=hold';
 import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=hold';
 import { steer } from './guide.js?v=hold';
+import { updateVisitors, shoo } from './visitors.js?v=hold';
 import {
   wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS,
   loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
-  EDGE_NAME, compassName, liftCap, buried, groundLine
+  EDGE_NAME, compassName, liftCap, buried, groundLine, eraOf
 } from './clearing.js?v=hold';
 import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=hold';
 import { FLORA, floraById } from './species.js?v=hold';
@@ -111,7 +112,15 @@ function shownLook() {
   if (LOOK.hand || !sim) return LOOK;
   const want = SEASON_LOOK[seasonOf(sim).id];
   if (!want) return LOOK;
-  return { ...LOOK, dots: want.dots, ink: want.ink, grain: want.grain, pattern: want.pattern };
+  const era = eraOf(sim);
+  const bump = era === 'undercroft' ? 0.18 : era === 'keep' ? 0.12 : era === 'ring' ? 0.06 : 0;
+  return {
+    ...LOOK,
+    dots: want.dots,
+    ink: Math.min(0.4, want.ink + bump * 0.6),
+    grain: Math.min(1, want.grain + bump),
+    pattern: era === 'undercroft' ? 'blue-noise' : want.pattern
+  };
 }
 
 function applyLook() {
@@ -390,7 +399,9 @@ function paintHud() {
   seasonLabel.textContent = `${season.id} · Y${sim.year} · ${season.edge} · ${dayPart(sim.time)}`;
   const veil = document.querySelector('#night');
   const dark = nightAmount(sim.time);
-  if (veil) veil.style.opacity = (dark * 0.85).toFixed(3);
+  const era = eraOf(sim);
+  const veilCap = era === 'undercroft' || era === 'keep' ? 0.92 : 0.85;
+  if (veil) veil.style.opacity = (dark * veilCap).toFixed(3);
   document.body.classList.toggle('night', dark > 0.45);
   const carry = sim.carrying ? 'stick' : sim.held || 'empty';
   const carryNames = { empty: 'nothing', stick: 'a stick', carrot: 'a carrot', turnip: 'a turnip', mushroom: 'a mushroom' };
@@ -646,6 +657,7 @@ function cannotWork(cell) {
 function sendHer(cell) {
   if (!cell || !sim) return;
   shooSquirrel(sim, cell);
+  shoo(sim, cell);
   const why = cannotWork(cell);
   if (why) {
     say(why);
@@ -859,7 +871,10 @@ function frame(now) {
         updateWeather(sim, bit);
         updateMotions(sim, bit);
         updateSigns(sim, bit);
+        updateVisitors(sim, bit);
         updateWater(sim, bit);
+        const stand = cellAt(sim.cells, sim.character.st.x, sim.character.st.z);
+        if (stand && !stand.hearth) stand.worn = Math.min(2, (stand.worn || 0) + bit * 0.08);
         sim.stage.update(bit, sim.time);
         sim.time += bit;
         budget -= bit;
@@ -1229,7 +1244,8 @@ function paintMeasures() {
     : `${name} looks ${edge}. ${seasonWord[0].toUpperCase()}${seasonWord.slice(1)} asks more.`;
   const line = document.querySelector('#measure-line');
   line.hidden = true;
-  const press = pressureOf(sim.year, sim.measures.climb);
+  const era = eraOf(sim);
+  const press = pressureOf(sim.year, sim.measures.climb, era);
   const ring = sim.holding ? 'the circle holds' : 'the circle is open';
   const fitsNow = Object.entries(sim.measures)
     .filter(([, value]) => value && value.home === season.id)
@@ -1241,7 +1257,10 @@ function paintMeasures() {
   const sown = planted ? `  ·  ${planted}\u00a0planted` : '';
   const rate = Math.round(sim.speed || 1);
   const clock = rate > 1 ? `×${rate}  ·  ` : '';
-  document.querySelector('#run-line').textContent = `${clock}water ×${press.toFixed(2)}  ·  ${ring}${sown}  ·  ${hint}`;
+  const eraWord = era === 'glade' ? '' : `  ·  ${era}`;
+  const storeN = sim.store?.sticks?.length || 0;
+  const store = storeN ? `  ·  store ${storeN}` : '';
+  document.querySelector('#run-line').textContent = `${clock}water ×${press.toFixed(2)}  ·  ${ring}${eraWord}${store}${sown}  ·  ${hint}`;
   if (!document.querySelector('#god-panel').hidden) syncGod();
 }
 

@@ -4,6 +4,7 @@ import { drawWeather, drawMemory } from './weather.js?v=hold';
 import { drawRest } from './day.js?v=hold';
 import { beginMound, raiseLand } from './growth.js?v=hold';
 import { drawSigns } from './signs.js?v=hold';
+import { drawVisitors } from './visitors.js?v=hold';
 import { INK, GRID, cellAt, hash, HEARTH_I, HEARTH_K, PAD, crownFade, walkHeight } from './world.js?v=hold';
 import { facedCell } from './avatar.js?v=hold';
 import { floraById } from './species.js?v=hold';
@@ -84,6 +85,7 @@ export function createStickSystem(B, KIT, sim) {
     drawGardens(draw, sim);
     drawWeather(draw, sim);
     drawRest(draw, sim);
+    drawVisitors(draw, sim);
     drawMotions(draw, sim);
   });
 }
@@ -179,7 +181,7 @@ function blob(draw, x, y, z, r, color, density) {
 
 function drawPlanted(draw, sim) {
   for (const tree of sim.trees) {
-    if (!tree.planted && !tree.fallen) continue;
+    if (!tree.fallen && !tree.planted && tree.group === 'plant') continue;
     const cell = sim.cells[tree.k * GRID + tree.i];
     if (!cell) continue;
     const g = tree.growth || 0.1;
@@ -187,6 +189,7 @@ function drawPlanted(draw, sim) {
     const y0 = walkHeight(cell) - 0.02;
     const form = treeForm(tree.kind);
     if (tree.fallen) {
+      if (!tree.planted && tree.rot == null) continue;
       const rot = Math.min(1, (tree.rot || 0) / Math.max(1, seasonLength(sim) * 2));
       const len = (0.7 + size * 0.55) * (1 - rot * 0.7);
       const y = y0 + 0.06;
@@ -218,9 +221,54 @@ function drawPlanted(draw, sim) {
       }
       continue;
     }
+    // Grove trees are baked at a middle stature. Only the years past that are drawn on top.
+    if (!tree.planted) {
+      drawGroveGain(draw, sim, tree, y0, tones, g, size, form);
+      continue;
+    }
     drawCrown(draw, sim, tree, y0, tones, g, size, form);
   }
   drawBeaver(draw, sim);
+}
+
+function drawGroveGain(draw, sim, tree, y0, tones, g, size, form) {
+  const baked = tree.baked || 2.2;
+  const span = statureOf(g);
+  const base = statureOf(baked);
+  if (span <= base + 0.03) return;
+  const gain = Math.min(1.8, span - base);
+  const sick = tree.sick ? 0.62 : 1;
+  const fade = Math.max(0.7, crownFade(tree.x - (sim.hearth?.x || 0), tree.z - (sim.hearth?.z || 0), sim.viewYaw));
+  const aim = (form?.h || 2.4) * 0.78;
+  const reachH = aim * (0.62 + Math.min(size, 1.5) * 0.22);
+  const crown = y0 + Math.min(reachH, 0.22 + span * reachH * 0.42) * (form?.rise < 0 ? 0.62 : 0.74);
+  const spread = (0.04 + span * 0.22) * Math.min(size, 1.35) * sick;
+  const clumps = Math.min(10, 2 + Math.floor(gain * 5));
+  const radius = (0.07 + Math.min(span, 2.2) * 0.06) * sick;
+  const seed = tree.seed || 1;
+  for (let n = 0; n < clumps; n++) {
+    const angle = hash(seed + n * 11 + 3) * Math.PI * 2;
+    const reach = spread * (0.35 + hash(seed + n * 7) * 0.7);
+    const lift = 0.08 + gain * 0.22 + (hash(seed + n * 5) - 0.35) * radius;
+    blob(
+      draw,
+      tree.x + Math.cos(angle) * reach,
+      crown + lift,
+      tree.z + Math.sin(angle) * reach * 0.86,
+      radius * (0.75 + hash(seed + n) * 0.4),
+      tones[n % tones.length],
+      2 * fade
+    );
+  }
+  if (gain > 0.35) {
+    const bark = form?.bark?.r?.[0] ?? INK.bark;
+    const top = crown + gain * 0.35;
+    draw.streak(
+      [tree.x, crown - 0.08, tree.z],
+      [tree.x + 0.01, top, tree.z],
+      { width: 0.035 + gain * 0.02, color: bark, density: 2.2, emissive: false, depth: true }
+    );
+  }
 }
 
 function woodName(kind) {
@@ -496,11 +544,13 @@ function nearWater(sim, tree) {
 }
 
 function rememberGrove(sim, tree) {
-  if (tree.planted || tree.age != null) return;
+  if (tree.planted || tree.aged) return;
+  tree.aged = true;
   const salt = hash(tree.i * 17 + tree.k * 13 + 4);
   const span = lifeSpan(tree.kind, salt);
-  tree.age = YEAR_SPAN * span * (0.2 + hash(tree.i * 3 + tree.k * 9) * 0.38);
-  tree.growth = Math.max(tree.growth || 0, 2.2);
+  if (tree.age == null) tree.age = YEAR_SPAN * span * (0.2 + hash(tree.i * 3 + tree.k * 9) * 0.38);
+  tree.baked = tree.baked || 2.2;
+  tree.growth = Math.max(tree.growth || 0, tree.baked);
   tree.seed = tree.seed || 1 + Math.floor(salt * 900);
 }
 
@@ -520,9 +570,9 @@ function tendLife(sim, tree) {
     fellTree(sim, tree, `The ${name} gives in.`);
     return;
   }
-  const grown = tree.planted ? tree.growth : Math.max(tree.growth || 0, 2);
+  const grown = tree.growth || 0;
   if (fallReady(tree.age, grown, hash((tree.seed || 1) + 11), tree.kind)) {
-    fellTree(sim, tree, tree.group === 'shrub' ? `The ${name} grew old.` : `The ${name} grew old.`);
+    fellTree(sim, tree, `The ${name} grew old.`);
   }
 }
 
@@ -643,15 +693,15 @@ export function updateSticks(sim, dt) {
       continue;
     }
     rememberGrove(sim, tree);
-    if (tree.planted && tree.group === 'plant') tree.growth = Math.min(1, (tree.growth || 0) + dt * 0.012);
-    else if (tree.planted) tree.growth = growWood(tree.growth, dt, tree.group === 'shrub', tree.sick);
+    if (tree.group === 'plant') tree.growth = Math.min(1, (tree.growth || 0) + dt * 0.012);
+    else tree.growth = growWood(tree.growth, dt, tree.group === 'shrub', tree.sick);
     tree.age = (tree.age || 0) + dt;
     const form = treeForm(tree.kind);
     const full = (form?.h || 2.4) * (tree.size || 1);
-    const span = statureOf(tree.planted ? tree.growth : 2.4);
+    const span = statureOf(tree.growth || 0);
     tree.drop = (cell?.elevation || 0.8) + Math.max(0.4, full * 0.22 * Math.min(span, 2.6));
     if (tree.group === 'plant' && cell) cell.moisture = Math.min(1, (cell.moisture || 0) + dt * 0.08);
-    if (tree.planted) rootTree(sim, tree);
+    if (tree.planted || tree.kind === 'alder' || tree.kind === 'willow') rootTree(sim, tree);
     tendLife(sim, tree);
   }
   updateBeaver(sim, dt);

@@ -205,9 +205,9 @@ export function seasonFit(home, seasonId) {
 // clearing still carries: an autumn at that pressure stands about fourteen deep.
 export const PRESSURE_CAP = 16;
 
-export function pressureOf(year, climb = CLIMB) {
+export function pressureOf(year, climb = CLIMB, era) {
   const y = Math.max(1, Number(year) || 1);
-  const c = Math.min(0.8, Math.max(0, Number(climb) || 0));
+  const c = pressureClimb(era, climb);
   if (!Number.isFinite(y)) return 1;
   return Math.min(PRESSURE_CAP, 1 + (y - 1) * c);
 }
@@ -253,7 +253,123 @@ const WEDGE_NAME = ['west', 'northwest', 'north', 'northeast', 'east', 'southeas
 
 export function holdsWater(cell) {
   if (!cell || cell.hearth) return false;
+  if (cell.sluice === 'shut') return true;
   return !!cell.berm || (cell.layers || 0) >= 3 || (cell.cubes || 0) > 0 || !!cell.dam;
+}
+
+// What stops what. A wall that holds water may still let a deer through.
+export function stops(cell, kind) {
+  if (!cell || cell.hearth) return false;
+  const cubes = cell.cubes || 0;
+  const berm = !!cell.berm;
+  const layers = cell.layers || 0;
+  const wall = berm || cubes > 0 || layers >= 3 || !!cell.dam || cell.sluice === 'shut';
+  const tall = cubes >= 2 || (berm && (cell.lift || 0) >= 2);
+  if (kind === 'water') return wall || (cell.sill || 0) <= -0.55;
+  if (kind === 'beast') {
+    if (cell.hurdle || cell.thorn) return true;
+    return cubes >= 1 || berm || !!cell.dam;
+  }
+  if (kind === 'people') {
+    if (cell.hurdle || cell.lintel) return true;
+    return tall || cubes >= 2 || !!cell.dam;
+  }
+  return wall;
+}
+
+export function wallHeight(cell) {
+  if (!cell || cell.hearth) return 0;
+  if (cell.berm) return 0.5 + Math.min(cell.coat || 1, 6) * 0.06 + (cell.lift || 0) * 0.1;
+  return (cell.cubes || 0) * 0.74 + Math.min(cell.layers || 0, 4) * 0.1;
+}
+
+export function roomsOf(cells, hearthI = 8, hearthK = 8, pad = 1.85) {
+  const list = cells || [];
+  if (!list.length) return [];
+  const span = Math.round(Math.sqrt(list.length));
+  const seen = new Uint8Array(list.length);
+  const rooms = [];
+  const wallStep = 0.9;
+  const indexOf = (i, k) => (i < 0 || k < 0 || i >= span || k >= span ? -1 : k * span + i);
+  const isWall = cell => wallHeight(cell) >= wallStep;
+  for (let start = 0; start < list.length; start++) {
+    if (seen[start] || isWall(list[start])) continue;
+    const queue = [start];
+    seen[start] = 1;
+    const members = [];
+    let edge = false;
+    let hasHearth = false;
+    let hasStore = false;
+    let hasSump = false;
+    let hasGarden = false;
+    for (let head = 0; head < queue.length; head++) {
+      const at = queue[head];
+      const cell = list[at];
+      members.push(cell);
+      if (cell.hearth) hasHearth = true;
+      if (cell.store) hasStore = true;
+      if ((cell.sill || 0) <= -0.55) hasSump = true;
+      if (cell.plot || cell.fruit) hasGarden = true;
+      if (cell.i === 0 || cell.k === 0 || cell.i === span - 1 || cell.k === span - 1) edge = true;
+      for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const next = indexOf(cell.i + di, cell.k + dk);
+        if (next < 0 || seen[next]) continue;
+        if (isWall(list[next])) continue;
+        if (Math.abs(wallHeight(list[next]) - wallHeight(cell)) > wallStep) continue;
+        seen[next] = 1;
+        queue.push(next);
+      }
+    }
+    if (edge || !members.length) continue;
+    let name = 'hall';
+    if (hasHearth) name = 'court';
+    else if (hasStore) name = 'store';
+    else if (hasSump) name = 'cistern';
+    else if (hasGarden) name = 'garden';
+    rooms.push({ name, cells: members, size: members.length });
+  }
+  return rooms;
+}
+
+export function eraOf(sim) {
+  const cells = sim?.cells || [];
+  const hearth = sim?.hearth || cells.find(cell => cell.hearth);
+  const hi = hearth?.i ?? 8;
+  const hk = hearth?.k ?? 8;
+  const pad = 1.85;
+  const rooms = roomsOf(cells, hi, hk, pad);
+  const closed = circleState(cells, hi, hk, pad).closed;
+  const heldYear = !!sim?.heldYear || !!sim?.circleSaid || (sim?.holding && (sim.year || 1) > 1);
+  let crest = 0;
+  const floor = hearth ? (hearth.elevation || 0.8) : 0.8;
+  for (const cell of cells) {
+    const dist = Math.hypot(cell.i - hi, cell.k - hk);
+    if (dist <= pad || dist >= 3.35 || cell.hearth) continue;
+    crest = Math.max(crest, wallHeight(cell) + (cell.elevation || 0));
+  }
+  const roofed = cells.some(cell => {
+    const dist = Math.hypot(cell.i - hi, cell.k - hk);
+    return dist <= pad && cell.roofed;
+  });
+  if (crest - floor >= 3 * 0.74 && roofed) return 'undercroft';
+  // Keep once the land holds at least two rooms (court plus another).
+  if (rooms.length >= 2 && rooms.some(room => room.name !== 'court')) return 'keep';
+  if (closed && heldYear) return 'ring';
+  if (sim?.era === 'undercroft' || sim?.era === 'keep' || sim?.era === 'ring') return sim.era;
+  return 'glade';
+}
+
+export function landCap(era) {
+  if (era === 'undercroft') return 1.3;
+  if (era === 'keep') return 1;
+  if (era === 'ring') return 0.7;
+  return 0.42;
+}
+
+export function pressureClimb(era, climb = CLIMB) {
+  const c = Math.min(0.8, Math.max(0, Number(climb) || 0));
+  if (era === 'keep' || era === 'undercroft') return c * 0.5;
+  return c;
 }
 
 const SMALL = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
@@ -346,8 +462,14 @@ export function idolLabel(stage) {
 }
 
 export function yearTitle(chronicle) {
-  if (chronicle?.circle) return 'The year the circle held.';
+  if (chronicle?.breach) return 'The year the wall broke.';
   if (chronicle?.drank) return 'The year the idol drank.';
+  if (chronicle?.circle) return 'The year the circle held.';
+  if (chronicle?.room) return 'The year the wall made a room.';
+  if (chronicle?.river && chronicle?.edge && EDGE_NAME[chronicle.edge]) {
+    return `The year the river turned ${EDGE_NAME[chronicle.edge]}.`;
+  }
+  if (chronicle?.visitor) return `The year the ${chronicle.visitor} came.`;
   if (chronicle?.wood && chronicle?.edge && EDGE_NAME[chronicle.edge]) {
     return `The year the ${chronicle.wood} took the ${EDGE_NAME[chronicle.edge]} gate.`;
   }
@@ -379,5 +501,21 @@ export function awayLine(seasons, capped) {
 }
 
 export function freshChronicle() {
-  return { circle: false, drank: false, wood: null, edge: null, berms: 0 };
+  return {
+    circle: false,
+    drank: false,
+    wood: null,
+    edge: null,
+    berms: 0,
+    river: false,
+    visitor: null,
+    room: false,
+    breach: false
+  };
 }
+
+export const ERA_LINE = {
+  ring: 'The ring is a wall.',
+  keep: 'The wall makes rooms.',
+  undercroft: 'The court is under the ground.'
+};

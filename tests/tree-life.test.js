@@ -102,3 +102,60 @@ test('a planted tree keeps growing, and age, sickness, and a beaver take differe
   assert.equal(willow.fallen, true);
   assert.ok(sim.events.some(event => event.text.includes('beaver') && event.text.includes('willow')));
 });
+
+test('grove trees keep climbing past their baked stature until they fall', async () => {
+  const rules = await import('../hugelkultur/clearing.js');
+  const sticks = await import('../hugelkultur/sticks.js');
+  const memory = await import('../hugelkultur/memory.js');
+  const world = await import('../hugelkultur/world.js');
+  world.useGrid(16);
+
+  const cells = board();
+  const oak = {
+    i: 3,
+    k: 3,
+    x: at(cells, 3, 3).x,
+    z: at(cells, 3, 3).z,
+    kind: 'oak',
+    planted: false,
+    group: 'tree',
+    cooldown: 0,
+    fallen: false,
+    size: 1,
+    seed: 2
+  };
+  at(cells, 3, 3).tree = true;
+  const sim = {
+    cells,
+    trees: [oak],
+    loose: [],
+    shed: 0,
+    away: true,
+    over: false,
+    quiet: true,
+    seasonIndex: 0,
+    year: 2,
+    time: 1,
+    events: [],
+    beaverWait: 0,
+    hearth: at(cells, 8, 8),
+    plots: [],
+    chronicle: rules.freshChronicle(),
+    live: [],
+    flood: 0,
+    measures: rules.blankMeasures()
+  };
+
+  sticks.updateSticks(sim, 0.2);
+  assert.equal(oak.baked, 2.2);
+  assert.ok(oak.growth >= 2.2);
+  const start = oak.growth;
+  for (let n = 0; n < 20; n++) memory.passSeason(sim);
+  assert.ok(oak.growth > start + 0.4, `grove grew from ${start} to ${oak.growth}`);
+  assert.ok(rules.statureOf(oak.growth) > rules.statureOf(oak.baked));
+  assert.equal(oak.fallen, false);
+
+  oak.age = rules.YEAR_SPAN * 200;
+  sticks.updateSticks(sim, 0.2);
+  assert.equal(oak.fallen, true);
+});
