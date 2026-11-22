@@ -370,6 +370,15 @@ body.night { background: #d5d7dc; }
   line-height: 1.45;
 }
 
+.end-read {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #5a3e2e;
+}
+
 .eyebrow {
   margin: 0;
   font-family: ui-monospace, Menlo, Consolas, monospace;

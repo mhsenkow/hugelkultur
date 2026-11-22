@@ -1,9 +1,9 @@
-import { GRID, ORIGIN, hash, cellAt, walkHeight, bedHeight } from './world.js?v=square24';
-import { nightAmount } from './day.js?v=square24';
-import { seasonOf } from './water.js?v=square24';
-import { beginMound } from './growth.js?v=square24';
-import { OPEN_CROWN } from './clearing.js';
-import { paintLeaf, paintFlake } from './gardens.js?v=age3';
+import { GRID, ORIGIN, hash, cellAt, walkHeight, bedHeight } from './world.js?v=fifty';
+import { nightAmount } from './day.js?v=fifty';
+import { seasonOf } from './water.js?v=fifty';
+import { beginMound } from './growth.js?v=fifty';
+import { OPEN_CROWN } from './clearing.js?v=fifty';
+import { paintLeaf, paintFlake } from './gardens.js?v=fifty';
 
 const RAIN = { width: 0.018, color: 12, density: 1.6, emissive: false, depth: true };
 const STAIN = { width: 0.08, color: 11, density: 2.2, emissive: false, depth: true };
@@ -214,6 +214,14 @@ export function updateWeather(sim, dt) {
       const [vx, vz] = hit.velocity || [0, 0];
       bit.x += vx * dt * 0.45 + bit.drift * dt * 0.08;
       bit.z += vz * dt * 0.45;
+      for (const other of sim.fall) {
+        if (other === bit || !other.raft) continue;
+        const gap = Math.hypot(other.x - bit.x, other.z - bit.z);
+        if (gap >= 0.9 || gap < 0.12) continue;
+        const pull = dt * 0.22;
+        bit.x += ((other.x - bit.x) / gap) * pull;
+        bit.z += ((other.z - bit.z) / gap) * pull;
+      }
       cling(bit);
       const cell = cellAt(sim.cells, bit.x, bit.z);
       if (cell && gate && Math.hypot(cell.i - gate.gate[0], cell.k - gate.gate[1]) < 1.85) {

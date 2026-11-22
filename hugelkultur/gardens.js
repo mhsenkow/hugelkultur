@@ -1,5 +1,5 @@
-import { floraById } from './species.js?v=square24';
-import { wornMeasures, seasonFit } from './clearing.js';
+import { floraById } from './species.js?v=fifty';
+import { wornMeasures, seasonFit } from './clearing.js?v=fifty';
 
 const SEASON_ID = ['SPR', 'SUM', 'AUT', 'WIN'];
 
@@ -82,6 +82,17 @@ export function updateGardens(sim, dt, playerDriving) {
         text = 'You eat the carrot. You can cross the gate.';
       }
       sim.events.push({ type: 'eat', text });
+      const hearth = sim.hearth;
+      const body = sim.character?.st;
+      if (hearth && body && Math.hypot(body.x - hearth.x, body.z - hearth.z) <= 2.55) {
+        sim.husks = sim.husks || [];
+        const n = sim.husks.length + 1;
+        sim.husks.push({
+          x: hearth.x + (((n * 17) % 10) / 10 - 0.5) * 0.42,
+          z: hearth.z + (((n * 29) % 10) / 10 - 0.5) * 0.42
+        });
+        if (sim.husks.length > 12) sim.husks.splice(0, sim.husks.length - 12);
+      }
       sim.held = null;
     }
   }

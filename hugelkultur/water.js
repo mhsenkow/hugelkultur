@@ -1,6 +1,6 @@
-import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=square24';
-import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear } from './clearing.js';
-import { settleMounds } from './growth.js?v=square24';
+import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade } from './world.js?v=fifty';
+import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice } from './clearing.js?v=fifty';
+import { settleMounds } from './growth.js?v=fifty';
 
 export const SEASON_LENGTH = 52;
 
@@ -11,7 +11,7 @@ export const SEASONS = [
   { id: 'WIN', edge: 'W', bit: FLOW.WIN, pip: '#9fd4e8', inflow: 0.09, drain: 0.014, friction: 0.4, line: 'Winter. Snow.' }
 ];
 
-const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
+export const OPPOSITE = { N: 'S', S: 'N', E: 'W', W: 'E' };
 
 const SEDIMENT = (color, strength) => ({ color, strength, height: 0.35, scale: 7 });
 
@@ -163,7 +163,10 @@ export function sidleGate(sim, season) {
   }
   if (!best || (best.i === gi && best.k === gk)) return false;
   const old = sim.cells[gk * GRID + gi];
-  if (old) old.stain = Math.min(1, (old.stain || 0) + 0.55);
+  if (old) {
+    old.stain = Math.min(1, (old.stain || 0) + 0.55);
+    old.oldGate = true;
+  }
   finger.gate = [best.i, best.k];
   best.sill = Math.min(best.sill || 0, 0) - 0.12;
   best.channel = true;
@@ -192,7 +195,9 @@ export function markMouth(sim) {
     const gate = Math.hypot(cell.i - gi, cell.k - gk) < 1.25;
     if (!mouth && !gate) continue;
     cell.mouth = true;
-    cell.stain = Math.min(1, Math.max(cell.stain || 0, gate ? 0.78 : 0.55));
+    const press = pressureOf(sim.year, sim.measures?.climb);
+    const heavy = Math.min(1, 0.55 + press / 10);
+    cell.stain = Math.min(1, Math.max(cell.stain || 0, (gate ? 0.78 : 0.55) * heavy));
   }
 }
 
@@ -213,9 +218,34 @@ export function waterLine(sim, stage) {
   return 'The idol is dry.';
 }
 
+function puffAt(sim, finger, mode, ink) {
+  if (!finger || !sim.motions) return;
+  const cell = sim.cells[finger.gate[1] * GRID + finger.gate[0]]
+    || sim.cells[finger.mouth[1] * GRID + finger.mouth[0]];
+  if (!cell) return;
+  sim.motions.push({
+    kind: 'puff',
+    t: 0,
+    dur: 2,
+    mode,
+    ink,
+    x: cell.x,
+    y: cell.elevation + 0.28,
+    z: cell.z
+  });
+}
+
 export function closeSeason(sim) {
   const finished = seasonOf(sim);
   rememberWater(sim);
+  if (!sim.quiet) {
+    const line = idolVoice(sim.seasonPeak || 'dry');
+    if (line) sim.events.push({ type: 'idol', text: line });
+    const next = SEASONS[(sim.seasonIndex + 1) % SEASONS.length];
+    puffAt(sim, sim.live?.find(item => item.bit === finished.bit), 'exhale', finished.id);
+    puffAt(sim, sim.live?.find(item => item.bit === next.bit), 'inhale', next.id);
+  }
+  sim.seasonPeak = 'dry';
   if ((sim.flood || 0) < 1) sidleGate(sim, finished);
   sim.seasonTime = 0;
   sim.seasonIndex = (sim.seasonIndex + 1) % SEASONS.length;
@@ -225,6 +255,20 @@ export function closeSeason(sim) {
     sim.yearLine = yearTitle(sim.chronicle);
     noteYear(sim);
     if (!sim.quiet) sim.events.push({ type: 'year', text: sim.yearLine });
+    sim.notches = (sim.notches || 0) + 1;
+    if (!sim.quiet && sim.hearth && sim.motions) {
+      const h = sim.hearth;
+      sim.motions.push({
+        kind: 'bird',
+        t: 0,
+        dur: 4,
+        x0: h.x - 3.2,
+        z0: h.z - 2.6,
+        x1: h.x + 3.8,
+        z1: h.z + 2.1,
+        y: h.elevation + 2.35
+      });
+    }
     sim.year += 1;
     sim.chronicle = freshChronicle();
     revealGlade(sim);
@@ -272,6 +316,9 @@ export function updateWater(sim, dt) {
 
   const depth = idolDepth(sim);
   const stage = idolStage(depth);
+  if (depth > (sim.highWater || 0)) sim.highWater = depth;
+  const rank = { dry: 0, hem: 1, drinks: 2, under: 3 };
+  if ((rank[stage] || 0) > (rank[sim.seasonPeak] || 0)) sim.seasonPeak = stage;
   if (stage === 'drinks') sim.flood += dt * 0.05;
   else if (stage === 'under') sim.flood += dt * 0.2;
   else if (stage === 'hem') sim.flood = Math.max(0, sim.flood - dt * 0.04);
@@ -279,10 +326,20 @@ export function updateWater(sim, dt) {
   if (sim.stageSaid !== stage) {
     const prev = sim.stageSaid;
     sim.stageSaid = stage;
-    const rank = { dry: 0, hem: 1, drinks: 2, under: 3 };
     const worse = (rank[stage] || 0) > (rank[prev] || 0);
     const recovered = stage === 'dry' && (rank[prev] || 0) >= 2;
     if (prev && !sim.quiet && (worse || recovered)) sim.events.push({ type: 'flood', text: waterLine(sim, stage) });
+    if (stage === 'drinks' && worse && !sim.quiet && sim.hearth && sim.motions) {
+      const hit = sim.snapshot?.sample?.(sim.hearth.x, sim.hearth.z);
+      sim.motions.push({
+        kind: 'ripple',
+        t: 0,
+        dur: 1.8,
+        x: sim.hearth.x,
+        y: (hit?.level || sim.hearth.elevation) + 0.02,
+        z: sim.hearth.z
+      });
+    }
   }
   if (sim.flood >= 9) {
     sim.over = true;

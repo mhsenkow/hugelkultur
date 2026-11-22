@@ -1,6 +1,6 @@
-import { PALETTE, STIPPLE, SCENE, hash, sceneCount, dressSculpt } from './world.js?v=square24';
-import { paintClip } from './motions.js';
-import { paintCrop, paintLeafStudy, paintSnowStudy } from './gardens.js?v=age3';
+import { PALETTE, STIPPLE, SCENE, hash, sceneCount, dressSculpt } from './world.js?v=fifty';
+import { paintClip } from './motions.js?v=fifty';
+import { paintCrop, paintLeafStudy, paintSnowStudy } from './gardens.js?v=fifty';
 
 const OAK_BARK = { r: [11, 5, 1] };
 const MAPLE_BARK = { r: [5, 11, 10] };

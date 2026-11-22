@@ -1,16 +1,17 @@
-import { drawGardens } from './gardens.js?v=age3';
-import { drawMotions } from './motions.js';
-import { drawWeather, drawMemory } from './weather.js?v=square24';
-import { drawRest } from './day.js?v=square24';
-import { beginMound, raiseLand } from './growth.js?v=square24';
-import { INK, GRID, cellAt, hash, HEARTH_I, HEARTH_K, PAD, crownFade, walkHeight } from './world.js?v=square24';
-import { facedCell } from './avatar.js?v=square24';
-import { floraById } from './species.js?v=square24';
-import { treeForm } from './specimens.js?v=square24';
-import { seasonOf, seasonLength } from './water.js?v=square24';
-import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN } from './clearing.js';
+import { drawGardens, paintLeaf } from './gardens.js?v=fifty';
+import { drawMotions } from './motions.js?v=fifty';
+import { drawWeather, drawMemory } from './weather.js?v=fifty';
+import { drawRest } from './day.js?v=fifty';
+import { beginMound, raiseLand } from './growth.js?v=fifty';
+import { drawSigns } from './signs.js?v=fifty';
+import { INK, GRID, cellAt, hash, HEARTH_I, HEARTH_K, PAD, crownFade, walkHeight } from './world.js?v=fifty';
+import { facedCell } from './avatar.js?v=fifty';
+import { floraById } from './species.js?v=fifty';
+import { treeForm } from './specimens.js?v=fifty';
+import { seasonOf, seasonLength } from './water.js?v=fifty';
+import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN } from './clearing.js?v=fifty';
 
-const CAPACITY = 7200;
+const CAPACITY = 8400;
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 function paintOf(kind) {
@@ -79,6 +80,7 @@ export function createStickSystem(B, KIT, sim) {
     drawPlanted(draw, sim);
     drawSticks(draw, sim);
     if (sim.drawGrowth) sim.drawGrowth(draw);
+    drawSigns(draw, sim);
     drawGardens(draw, sim);
     drawWeather(draw, sim);
     drawRest(draw, sim);
@@ -88,6 +90,18 @@ export function createStickSystem(B, KIT, sim) {
 
 function drawStick(draw, ax, ay, az, bx, by, bz, kind) {
   draw.streak([ax, ay, az], [bx, by, bz], paintOf(kind));
+  if (kind !== 'birch') return;
+  const mx = (ax + bx) / 2;
+  const my = (ay + by) / 2;
+  const mz = (az + bz) / 2;
+  const px = -(bz - az) * 0.18;
+  const pz = (bx - ax) * 0.18;
+  const tick = { width: 0.018, color: 1, density: 2.3, emissive: false, depth: true };
+  draw.streak([mx - px, my, mz - pz], [mx + px, my + 0.008, mz + pz], tick);
+  const mx2 = ax + (bx - ax) * 0.32;
+  const my2 = ay + (by - ay) * 0.32;
+  const mz2 = az + (bz - az) * 0.32;
+  draw.streak([mx2 - px, my2, mz2 - pz], [mx2 + px, my2 + 0.008, mz2 + pz], tick);
 }
 
 function stackHidden(sim, cell) {
@@ -100,7 +114,7 @@ function drawSticks(draw, sim) {
   for (const stick of sim.loose) drawLoose(draw, sim, stick);
   if (sim.carrying && sim.character) {
     const st = sim.character.st;
-    const y = st.y + 0.92;
+    const y = st.y + (sim.carryKind === 'oak' ? 0.84 : 0.92);
     const wood = woodOf(sim.carryKind);
     const dx = Math.cos(st.face) * wood.half;
     const dz = Math.sin(st.face) * wood.half;
@@ -270,6 +284,11 @@ function drawCrown(draw, sim, tree, y0, tones, g, size, form) {
   if (tree.sick) {
     blob(draw, tree.x + 0.05, y0 + h * 0.4, tree.z, 0.05, 6, 1.4);
     blob(draw, tree.x - 0.04, y0 + h * 0.55, tree.z + 0.03, 0.04, 13, 1.3);
+    const fall = ((sim.time || 0) + (tree.seed || 1)) % 3.4;
+    if (fall < 1.3) {
+      const t = fall / 1.3;
+      paintLeaf(draw, tree.x + 0.12, y0 + h * (0.7 - t * 0.55), tree.z + 0.04, t * 4);
+    }
   }
 }
 
@@ -344,6 +363,20 @@ function slideBirch(sim, cell) {
   addWood(next, 'birch');
   sim.bedDirty = true;
   sim.events.push({ type: 'note', text: 'The birch slides.' });
+  if (sim.motions) {
+    sim.motions.push({
+      kind: 'slide',
+      t: 0,
+      dur: 0.55,
+      x: cell.x,
+      y: cell.elevation + 0.08,
+      z: cell.z,
+      tx: next.x,
+      ty: next.elevation + 0.08,
+      tz: next.z,
+      yaw: Math.atan2(next.z - cell.z, next.x - cell.x)
+    });
+  }
   return true;
 }
 
@@ -383,6 +416,14 @@ function knitWillow(sim, cell) {
     if (best.layers >= 3) beginMound(sim, best, 'tend', 'The willow knits. It is good.');
   }
   sim.events.push({ type: 'note', text: 'The willow knits.' });
+  sim.weaves = sim.weaves || [];
+  sim.weaves.push({
+    i: cell.i,
+    k: cell.k,
+    ni: best.i,
+    nk: best.k,
+    until: (sim.time || 0) + seasonLength(sim)
+  });
 }
 
 function compostStick(sim, stick) {
@@ -484,10 +525,65 @@ function tendLife(sim, tree) {
   }
 }
 
+function bankOf(sim, x, z) {
+  let best = null;
+  let score = 1e9;
+  for (const cell of sim.cells || []) {
+    if (!cell.channel || cell.hearth) continue;
+    const d = Math.hypot(cell.x - x, cell.z - z);
+    if (d < score) {
+      score = d;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function placeDam(sim, tree) {
+  let best = null;
+  let score = 1e9;
+  for (const cell of sim.cells || []) {
+    if (cell.hearth || cell.plot) continue;
+    const distH = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    const inRing = distH > PAD && distH < 3.35;
+    if (!cell.channel && !inRing) continue;
+    const d = Math.hypot(cell.x - tree.x, cell.z - tree.z) + (inRing ? 0 : 4);
+    if (d < score) {
+      score = d;
+      best = cell;
+    }
+  }
+  if (!best || best.dam) return;
+  best.dam = true;
+  sim.bedDirty = true;
+  sim.events?.push({ type: 'note', text: 'The beaver keeps a dam.' });
+}
+
 function updateBeaver(sim, dt) {
   if (sim.beaver) {
     const beaver = sim.beaver;
     const tree = beaver.tree;
+    if (beaver.haul) {
+      const bank = beaver.bank || bankOf(sim, beaver.x, beaver.z);
+      beaver.bank = bank;
+      if (bank) {
+        const dx = bank.x - beaver.x;
+        const dz = bank.z - beaver.z;
+        const dist = Math.hypot(dx, dz) || 1;
+        beaver.yaw = Math.atan2(dz, dx);
+        if (dist > 0.32) {
+          const step = Math.min(dist, dt * 0.8);
+          beaver.x += (dx / dist) * step;
+          beaver.z += (dz / dist) * step;
+          return;
+        }
+        spawn(sim, bank.i, bank.k, beaver.yaw, beaver.haul.kind);
+        spawn(sim, bank.i, bank.k, beaver.yaw + 0.4, beaver.haul.kind);
+      }
+      beaver.haul = null;
+      beaver.leave = 0;
+      return;
+    }
     if (!tree || tree.fallen) {
       beaver.leave = (beaver.leave || 0) + dt;
       if (beaver.leave > 8) sim.beaver = null;
@@ -505,7 +601,12 @@ function updateBeaver(sim, dt) {
     }
     beaver.chew = (beaver.chew || 0) + dt;
     if (beaver.chew < 12) return;
+    const kind = woodKind(tree);
     fellTree(sim, tree, `A beaver takes the ${woodName(tree.kind)}.`);
+    beaver.haul = { kind };
+    beaver.bank = null;
+    sim.beaverFells = (sim.beaverFells || 0) + 1;
+    if (sim.beaverFells === 3) placeDam(sim, tree);
     beaver.leave = 0;
     return;
   }
@@ -532,6 +633,11 @@ export function updateSticks(sim, dt) {
     if (tree.fallen) {
       if (!tree.planted) continue;
       tree.rot = (tree.rot || 0) + dt;
+      const mark = (sim.year || 1) * 4 + (sim.seasonIndex || 0);
+      if (tree.shedAt !== mark && tree.rot < seasonLength(sim) * 1.8) {
+        tree.shedAt = mark;
+        dropFrom(sim, { ...tree, kind: woodKind(tree) }, tree.i + 1, tree.k);
+      }
       if (tree.rot > seasonLength(sim) * 2) gone.push(tree);
       continue;
     }

@@ -1,7 +1,7 @@
-import { GRID, cellAt } from './world.js?v=square24';
-import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=square24';
-import { beginMound, raiseLand, settleMounds } from './growth.js?v=square24';
-import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js';
+import { GRID, cellAt } from './world.js?v=fifty';
+import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=fifty';
+import { beginMound, raiseLand, settleMounds } from './growth.js?v=fifty';
+import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js?v=fifty';
 
 const FOREST_KEY = 'hugelkultur-forest';
 
@@ -15,7 +15,7 @@ function cellRow(cell) {
     || cell.lift || cell.raft || cell.rooted || cell.parched || cell.rock || cell.log || cell.stood
     || (cell.land || 0) > 0 || (cell.sunk || 0) > 0 || cell.nutAt || cell.cubes
     || (cell.litter || 0) > 0.2 || (cell.snow || 0) > 0.2
-    || (cell.moisture || 0) > 0.4;
+    || (cell.moisture || 0) > 0.4 || cell.oldGate || cell.dam || cell.rockAge;
   if (!lived) return null;
   return {
     i: cell.i,
@@ -49,7 +49,10 @@ function cellRow(cell) {
     nutAt: cell.nutAt || 0,
     cubes: cell.cubes || 0,
     block: Array.isArray(cell.block) ? cell.block.slice() : null,
-    knitted: !!cell.knitted
+    knitted: !!cell.knitted,
+    oldGate: !!cell.oldGate,
+    dam: !!cell.dam,
+    rockAge: cell.rockAge || 0
   };
 }
 
@@ -121,6 +124,14 @@ export function snapshotForest(sim, seed) {
       rot: tree.rot || 0
     })),
     beaverWait: sim.beaverWait || 0,
+    beaverFells: sim.beaverFells || 0,
+    highWater: sim.highWater || 0,
+    notches: sim.notches || 0,
+    husks: (sim.husks || []).slice(-12),
+    weaves: (sim.weaves || []).filter(item => item.until > sim.time).map(item => ({
+      i: item.i, k: item.k, ni: item.ni, nk: item.nk, until: item.until
+    })),
+    seasonPeak: sim.seasonPeak || 'dry',
     water,
     over: !!sim.over,
     flood: sim.flood || 0,
@@ -208,6 +219,9 @@ export function applyForest(sim, saved) {
     cell.cubes = row.cubes || 0;
     cell.block = Array.isArray(row.block) ? row.block.slice() : null;
     cell.knitted = !!row.knitted;
+    cell.oldGate = !!row.oldGate;
+    cell.dam = !!row.dam;
+    cell.rockAge = row.rockAge || 0;
     if (row.tree) cell.tree = true;
   }
   if (Array.isArray(saved.loose)) {
@@ -249,6 +263,12 @@ export function applyForest(sim, saved) {
     });
   }
   sim.beaverWait = saved.beaverWait || 0;
+  sim.beaverFells = saved.beaverFells || 0;
+  sim.highWater = saved.highWater || 0;
+  sim.notches = saved.notches || 0;
+  sim.husks = Array.isArray(saved.husks) ? saved.husks.slice(-12) : [];
+  sim.weaves = Array.isArray(saved.weaves) ? saved.weaves.slice() : [];
+  sim.seasonPeak = saved.seasonPeak || 'dry';
   for (const stump of saved.stumps || []) {
     const tree = sim.trees.find(item => !item.planted && item.i === stump.i && item.k === stump.k);
     if (!tree) continue;
@@ -322,6 +342,7 @@ export function passSeason(sim) {
     if (sim.chronicle) sim.chronicle.berms = sim.berms || 0;
     sim.yearLine = yearTitle(sim.chronicle);
     noteYear(sim);
+    sim.notches = (sim.notches || 0) + 1;
     sim.year += 1;
     sim.chronicle = freshChronicle();
     sim.quiet = false;

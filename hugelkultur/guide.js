@@ -1,7 +1,7 @@
-import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=square24';
-import { seasonOf } from './water.js?v=square24';
-import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater } from './clearing.js';
-import { sowWood } from './sticks.js?v=square24';
+import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=fifty';
+import { seasonOf } from './water.js?v=fifty';
+import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater } from './clearing.js?v=fifty';
+import { sowWood } from './sticks.js?v=fifty';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -751,6 +751,13 @@ function choose(sim) {
 
   if (decline(sim, row)) return guide.goal;
 
+  if (row.love * row.fit > 0.38) {
+    const sick = (sim.trees || []).find(tree => tree.sick && !tree.fallen && !tree.attended && tree.group !== 'plant');
+    if (sick && !skipped(sim, `attend:${sick.i},${sick.k}`)) {
+      return { kind: 'attend', x: sick.x, z: sick.z, tree: sick };
+    }
+  }
+
   if (row.home !== seasonOf(sim).id && sim.time > (guide.nextLook || 0) && hash(sim.year * 40 + Math.floor(sim.time / 2)) < row.pause * 0.2) {
     guide.nextLook = sim.time + 7;
     guide.pauseUntil = sim.time + 0.9;
@@ -815,6 +822,7 @@ function abandon(sim, goal) {
   else if (goal.kind === 'eat' && goal.id != null) sim.guide.skip.set(`eat:${goal.id}`, until);
   else if (goal.kind === 'fetch') sim.guide.skip.set(`fetch:${Math.round(goal.x * 2)},${Math.round(goal.z * 2)}`, until);
   else if (goal.kind === 'shake') sim.guide.skip.set(`shake:${Math.round(goal.x)},${Math.round(goal.z)}`, sim.time + 6);
+  else if (goal.kind === 'attend' && goal.tree) sim.guide.skip.set(`attend:${goal.tree.i},${goal.tree.k}`, sim.time + 16);
 }
 
 function nextStep(sim, here, there) {
@@ -876,6 +884,7 @@ function goalHolds(sim) {
   const goal = sim.guide.goal;
   if (!goal) return false;
   if (goal.kind === 'look') return sim.guide.pauseUntil > sim.time;
+  if (goal.kind === 'attend') return Boolean(goal.tree && goal.tree.sick && !goal.tree.fallen);
   if (goal.kind === 'place') {
     if (!sim.carrying) return false;
     const cell = sim.cells[goal.k * GRID + goal.i];
@@ -963,7 +972,18 @@ export function steer(sim, dt, playerDriving) {
   }
   const goal = guide.goal;
   if (!goal) return { move: 0, mz: 0 };
-  if (goal.kind === 'look') return { move: 0, mz: 0, face: LOOK_FACE[goal.edge] ?? 0 };
+  if (goal.kind === 'look') return { move: 0, mz: 0, face: goal.face ?? LOOK_FACE[goal.edge] ?? 0 };
+  if (goal.kind === 'attend') {
+    if (Math.hypot(goal.x - st.x, goal.z - st.z) < 0.52) {
+      if (!goal.arrived) goal.arrived = sim.time;
+      if (sim.time - goal.arrived > 1.25) {
+        if (goal.tree) goal.tree.attended = true;
+        guide.goal = null;
+      }
+      return { move: 0, mz: 0, face: Math.atan2(goal.z - st.z, goal.x - st.x) };
+    }
+    return toward(sim, goal);
+  }
   if (goal.kind === 'place') {
     const cell = sim.cells[goal.k * GRID + goal.i];
     const stand = standOn(sim, cell);

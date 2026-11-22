@@ -1,6 +1,6 @@
-import { layGardens } from './gardens.js?v=age3';
-import { sculptTree } from './specimens.js?v=square24';
-import { freshChronicle, gladeBeams } from './clearing.js';
+import { layGardens } from './gardens.js?v=fifty';
+import { sculptTree } from './specimens.js?v=fifty';
+import { freshChronicle, gladeBeams } from './clearing.js?v=fifty';
 
 export const GRID_SIZES = [16, 32, 64];
 export let GRID = 16;

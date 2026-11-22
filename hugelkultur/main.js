@@ -1,23 +1,24 @@
 import { createRenderer } from '../webgl.mjs';
-import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=square24';
-import { createAvatar, movement, wearSpirit } from './avatar.js?v=square24';
-import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=square24';
-import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=square24';
-import { updateGrowth, drawGrowth, moundLine, seedSquirrels, shooSquirrel } from './growth.js?v=square24';
-import { updateGardens } from './gardens.js?v=age3';
-import { updateMotions, MOTIONS } from './motions.js';
-import { updateWeather } from './weather.js?v=square24';
-import { updateDay, nightAmount, dayPart } from './day.js?v=square24';
-import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=square24';
-import { steer } from './guide.js?v=square24';
+import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=fifty';
+import { createAvatar, movement, wearSpirit } from './avatar.js?v=fifty';
+import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=fifty';
+import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=fifty';
+import { updateGrowth, drawGrowth, moundLine, seedSquirrels, shooSquirrel } from './growth.js?v=fifty';
+import { updateGardens } from './gardens.js?v=fifty';
+import { updateMotions, MOTIONS } from './motions.js?v=fifty';
+import { updateSigns } from './signs.js?v=fifty';
+import { updateWeather } from './weather.js?v=fifty';
+import { updateDay, nightAmount, dayPart } from './day.js?v=fifty';
+import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=fifty';
+import { steer } from './guide.js?v=fifty';
 import {
   wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS,
   loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
-  EDGE_NAME, compassName, liftCap, buried
-} from './clearing.js';
-import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=square24';
-import { FLORA, floraById } from './species.js?v=square24';
-import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=square24';
+  EDGE_NAME, compassName, liftCap, buried, groundLine
+} from './clearing.js?v=fifty';
+import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=fifty';
+import { FLORA, floraById } from './species.js?v=fifty';
+import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=fifty';
 
 const canvas = document.querySelector('#view');
 const seasonLabel = document.querySelector('#season-label');
@@ -223,52 +224,98 @@ function artSize() {
   return { width: Math.round(width / over), height: Math.round(height / over) };
 }
 
+let floodDrone = null;
+
+function playPhrase(freqs, dur, kind, volume) {
+  const now = audioCtx.currentTime;
+  const step = dur / Math.max(1, freqs.length);
+  freqs.forEach((freq, index) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = kind;
+    const start = now + index * step * 0.72;
+    osc.frequency.setValueAtTime(freq, start);
+    const next = freqs[index + 1] || freq * 0.92;
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, next), start + step);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.linearRampToValueAtTime(volume, start + 0.02);
+    gain.gain.linearRampToValueAtTime(0.001, start + step + 0.04);
+    osc.start(start);
+    osc.stop(start + step + 0.06);
+  });
+}
+
 function tone(type) {
   if (!audioEnabled) return;
   const Context = window.AudioContext || window.webkitAudioContext;
   if (!Context) return;
   audioCtx ??= new Context();
   if (audioCtx.state === 'suspended') audioCtx.resume();
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  const now = audioCtx.currentTime;
   const notes = {
-    place: [220, 140, 0.07, 'triangle'],
-    maple: [240, 150, 0.07, 'triangle'],
-    oak: [130, 78, 0.12, 'triangle'],
-    birch: [620, 410, 0.06, 'sine'],
-    willow: [280, 170, 0.1, 'triangle'],
-    alder: [168, 112, 0.1, 'sine'],
-    take: [330, 220, 0.06, 'sine'],
-    shake: [180, 320, 0.09, 'triangle'],
-    berm: [196, 98, 0.32, 'sine'],
-    flood: [166, 117, 0.36, 'sawtooth'],
-    eat: [440, 660, 0.12, 'sine'],
-    plant: [392, 523, 0.16, 'sine'],
-    year: [262, 392, 0.28, 'sine']
+    place: { freqs: [220, 146], dur: 0.08, kind: 'triangle', volume: 0.06 },
+    maple: { freqs: [146, 196], dur: 0.09, kind: 'triangle', volume: 0.06 },
+    oak: { freqs: [98, 130], dur: 0.14, kind: 'triangle', volume: 0.07 },
+    birch: { freqs: [220, 294], dur: 0.08, kind: 'sine', volume: 0.055 },
+    willow: { freqs: [164, 220], dur: 0.12, kind: 'triangle', volume: 0.06 },
+    alder: { freqs: [130, 164], dur: 0.12, kind: 'sine', volume: 0.06 },
+    take: { freqs: [330, 220], dur: 0.07, kind: 'sine', volume: 0.05 },
+    shake: { freqs: [180, 320], dur: 0.1, kind: 'triangle', volume: 0.055 },
+    berm: { freqs: [196, 247, 294], dur: 0.42, kind: 'sine', volume: 0.05 },
+    flood: { freqs: [166, 117], dur: 0.36, kind: 'sawtooth', volume: 0.07 },
+    eat: { freqs: [440, 660], dur: 0.12, kind: 'sine', volume: 0.05 },
+    plant: { freqs: [392, 523], dur: 0.16, kind: 'sine', volume: 0.05 },
+    year: { freqs: [262, 392], dur: 0.28, kind: 'sine', volume: 0.055 },
+    circle: { freqs: [262, 330, 392], dur: 0.7, kind: 'sine', volume: 0.045 },
+    open: { freqs: [392, 330, 262], dur: 0.55, kind: 'sine', volume: 0.03 }
   };
-  const [a, b, dur, kind] = notes[type] || notes.place;
-  osc.type = kind;
-  osc.frequency.setValueAtTime(a, now);
-  osc.frequency.exponentialRampToValueAtTime(b, now + dur);
-  gain.gain.setValueAtTime(type === 'flood' ? 0.08 : 0.06, now);
-  gain.gain.linearRampToValueAtTime(0.001, now + dur);
-  osc.start(now);
-  osc.stop(now + dur + 0.02);
-  if (type === 'flood') {
-    const clash = audioCtx.createOscillator();
-    const clashGain = audioCtx.createGain();
-    clash.connect(clashGain);
-    clashGain.connect(audioCtx.destination);
-    clash.type = 'sawtooth';
-    clash.frequency.setValueAtTime(233, now);
-    clashGain.gain.setValueAtTime(0.04, now);
-    clashGain.gain.linearRampToValueAtTime(0.001, now + dur);
-    clash.start(now);
-    clash.stop(now + dur + 0.02);
+  const row = notes[type] || notes.place;
+  playPhrase(row.freqs, row.dur, row.kind, row.volume);
+}
+
+function stopDrone() {
+  if (!floodDrone || !audioCtx) {
+    floodDrone = null;
+    return;
   }
+  const now = audioCtx.currentTime;
+  try {
+    floodDrone.gain.gain.linearRampToValueAtTime(0.0001, now + 0.18);
+    floodDrone.osc.stop(now + 0.22);
+  } catch {
+    /* already stopped */
+  }
+  floodDrone = null;
+}
+
+function keepDrone(stage) {
+  if (!audioEnabled) {
+    stopDrone();
+    return;
+  }
+  const pitch = { hem: 46, drinks: 58, under: 72 }[stage];
+  if (!pitch) {
+    stopDrone();
+    return;
+  }
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) return;
+  audioCtx ??= new Context();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!floodDrone) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = pitch;
+    gain.gain.value = 0.018;
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    floodDrone = { osc, gain };
+    return;
+  }
+  floodDrone.osc.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.28);
 }
 
 function say(text) {
@@ -278,12 +325,16 @@ function say(text) {
 function drainEvents() {
   let line = null;
   let answer = null;
-  const voiced = new Set(['year', 'season', 'flood', 'stone', 'fall', 'rot', 'plant', 'sow', 'fern', 'glade', 'nut', 'squirrel', 'ground', 'circle', 'eat']);
+  const voiced = new Set(['year', 'season', 'flood', 'stone', 'fall', 'rot', 'plant', 'sow', 'fern', 'glade', 'nut', 'squirrel', 'ground', 'circle', 'eat', 'idol']);
   for (const event of sim.events) {
     const kept = !sim.fast || voiced.has(event.type);
     if (event.text && kept) {
       if (event.type === 'plant' || event.type === 'sow') answer = event.text;
       else if (!sim.sow) line = event.text;
+    }
+    if (event.type === 'circle') {
+      if (String(event.text).includes('holds')) tone('circle');
+      else if (String(event.text).includes('opens')) tone('open');
     }
     const musical = ['place', 'take', 'shake', 'berm', 'flood', 'eat', 'plant', 'year', 'oak', 'birch', 'willow', 'alder', 'maple'].includes(event.type);
     if (musical && (!sim.fast || event.type === 'year' || event.type === 'flood')) tone(event.type);
@@ -326,6 +377,7 @@ function paintHud() {
   paintFlora(false);
   paintSpirits(false);
   const stage = sim.over ? 'under' : idolStage(idolDepth(sim));
+  keepDrone(sim.over ? 'under' : stage);
   const damp = stage === 'dry' && clearingDepth(sim) > 0.045;
   hearthLabel.textContent = idolLabel(stage);
   hearthLabel.title = damp ? 'Water is in the ring.' : '';
@@ -351,6 +403,15 @@ function paintHud() {
   const list = document.querySelector('#end-lines');
   if (list && list.childElementCount !== Math.min(8, lines.length)) {
     list.replaceChildren(...lines.slice(-8).map(text => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      return item;
+    }));
+  }
+  const read = document.querySelector('#end-read');
+  if (read) {
+    const last = lines.slice(-3);
+    read.replaceChildren(...last.map(text => {
       const item = document.createElement('li');
       item.textContent = text;
       return item;
@@ -560,7 +621,9 @@ function sendHer(cell) {
   sim.wantStick = null;
   const watch = `You watch the ${compassName(cell.i, cell.k, sim.hearth?.i ?? 8, sim.hearth?.k ?? 8)}.`;
   const story = cell.story?.length ? moundLine(cell) : '';
-  say(story ? `${watch} ${story}` : watch);
+  const ground = groundLine(cell.cubes || 0);
+  const extra = [story, ground].filter(Boolean).join(' ');
+  say(extra ? `${watch} ${extra}` : watch);
 }
 
 function focusSubject(hit, frame) {
@@ -747,13 +810,18 @@ function frame(now) {
       updateDay(sim, bit, driving);
       const auto = steer(sim, bit, driving);
       const input = driving ? movement(keys, yaw) : (auto || { move: 0, mz: 0 });
-      const paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : input;
+      let paced = sim.haste > 0 ? { ...input, move: (input.move || 0) * sim.pace, mz: (input.mz || 0) * sim.pace } : { ...input };
+      if (sim.carrying && sim.carryKind === 'oak') {
+        paced.move = (paced.move || 0) * 0.92;
+        paced.mz = (paced.mz || 0) * 0.92;
+      }
       sim.character.update(bit, paced, sim.time);
       updateSticks(sim, bit);
       updateGrowth(sim, bit);
       updateGardens(sim, bit, driving);
       updateWeather(sim, bit);
       updateMotions(sim, bit);
+      updateSigns(sim, bit);
       updateWater(sim, bit);
       sim.stage.update(bit, sim.time);
       sim.time += bit;
@@ -1529,6 +1597,7 @@ window.addEventListener('pagehide', () => {
 document.querySelector('#sound').addEventListener('click', event => {
   audioEnabled = !audioEnabled;
   event.currentTarget.setAttribute('aria-pressed', String(audioEnabled));
+  if (!audioEnabled) stopDrone();
 });
 
 const floraToggle = document.querySelector('#flora-toggle');

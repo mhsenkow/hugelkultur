@@ -1,5 +1,5 @@
-import { GRID, HEARTH_I, HEARTH_K, cellAt, hash, walkHeight } from './world.js?v=square24';
-import { SPIRITS, spiritById } from './avatars.js?v=square24';
+import { GRID, HEARTH_I, HEARTH_K, cellAt, hash, walkHeight } from './world.js?v=fifty';
+import { SPIRITS, spiritById } from './avatars.js?v=fifty';
 
 // A day is long enough to watch the work. Night is long enough to see them rest.
 // Sleep puts the worn body back on open ground, so a tower or a closed corner ends at dawn.
@@ -223,18 +223,29 @@ function wakeAt(sim) {
   sim.still = 0;
   sim.markX = st.x;
   sim.markZ = st.z;
+  if (Array.isArray(sim.motions)) {
+    sim.motions.push({
+      kind: 'wake',
+      t: 0,
+      dur: 1.05,
+      id: sim.spiritId || 'cloud',
+      x: st.x,
+      y: st.y,
+      z: st.z
+    });
+  }
 }
 
-function pocket(sim) {
+function pocketWalk(sim) {
   const here = cellAt(sim.cells, sim.character.st.x, sim.character.st.z);
-  if (!here) return 0;
+  if (!here) return [];
   const seen = new Uint8Array(sim.cells.length);
   const queue = [here.k * GRID + here.i];
   seen[queue[0]] = 1;
-  let count = 0;
-  for (let head = 0; head < queue.length && count < 8; head++) {
-    count += 1;
+  const cells = [];
+  for (let head = 0; head < queue.length && cells.length < 8; head++) {
     const cell = sim.cells[queue[head]];
+    cells.push(cell);
     for (const [di, dk] of STEP) {
       const i = cell.i + di;
       const k = cell.k + dk;
@@ -247,7 +258,11 @@ function pocket(sim) {
       queue.push(index);
     }
   }
-  return count;
+  return cells;
+}
+
+function pocket(sim) {
+  return pocketWalk(sim).length;
 }
 
 function restScale(sim) {
@@ -287,6 +302,8 @@ function watchCorner(sim, dt) {
       return;
     }
     fallAsleep(sim, 'nap');
+    sim.pocketMark = pocketWalk(sim);
+    sim.pocketUntil = (sim.time || 0) + 2.4;
     sim.napUntil = (sim.time || 0) + 8;
     return;
   }
@@ -295,6 +312,8 @@ function watchCorner(sim, dt) {
   const waited = (high ? 3.5 : 6) * scale;
   if (sim.still < waited) return;
   fallAsleep(sim, 'nap');
+  sim.pocketMark = pocketWalk(sim);
+  sim.pocketUntil = (sim.time || 0) + 2.4;
   sim.napUntil = (sim.time || 0) + 8;
 }
 

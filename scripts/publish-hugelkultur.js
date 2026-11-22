@@ -25,6 +25,7 @@ copy(path.join(root, 'src', 'camera-lens.js'), path.join(site, 'src', 'camera-le
 
 for (const name of fs.readdirSync(game)) {
   if (name === 'index.html' || name === 'main.js') continue;
+  if (name.endsWith('.md')) continue;
   copy(path.join(game, name), path.join(site, name));
 }
 

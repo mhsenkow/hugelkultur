@@ -253,7 +253,26 @@ const WEDGE_NAME = ['west', 'northwest', 'north', 'northeast', 'east', 'southeas
 
 export function holdsWater(cell) {
   if (!cell || cell.hearth) return false;
-  return !!cell.berm || (cell.layers || 0) >= 3 || (cell.cubes || 0) > 0;
+  return !!cell.berm || (cell.layers || 0) >= 3 || (cell.cubes || 0) > 0 || !!cell.dam;
+}
+
+const SMALL = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+export function groundLine(cubes) {
+  const n = Math.max(0, Math.round(Number(cubes) || 0));
+  if (n <= 0) return '';
+  if (n === 1) return 'A year is in this ground.';
+  if (n < 10) {
+    const word = SMALL[n - 1];
+    return `${word.charAt(0).toUpperCase()}${word.slice(1)} years are in this ground.`;
+  }
+  return 'Many years are in this ground.';
+}
+
+export function idolVoice(peak) {
+  if (peak === 'dry') return 'Nothing came. It is good.';
+  if (peak === 'hem') return 'The water came to the hem. It passed.';
+  return '';
 }
 
 export function wedgeOf(i, k, hearthI, hearthK) {

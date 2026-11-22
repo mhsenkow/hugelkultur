@@ -146,7 +146,14 @@ test('clearing rules', async () => {
   assert.equal(rules.compassName(8, 6), 'north');
   assert.equal(rules.stillWants({ tend: true }), ' It still wants leaves, snow, rain.');
   assert.equal(rules.holdsWater({ cubes: 1 }), true);
+  assert.equal(rules.holdsWater({ dam: true }), true);
   assert.equal(rules.holdsWater({ layers: 1 }), false);
+  assert.equal(rules.groundLine(1), 'A year is in this ground.');
+  assert.equal(rules.groundLine(3), 'Three years are in this ground.');
+  assert.equal(rules.groundLine(12), 'Many years are in this ground.');
+  assert.equal(rules.idolVoice('dry'), 'Nothing came. It is good.');
+  assert.equal(rules.idolVoice('hem'), 'The water came to the hem. It passed.');
+  assert.equal(rules.idolVoice('drinks'), '');
   assert.equal(rules.buried({ berm: false, layers: 2, snow: 0.6 }), true);
   assert.equal(rules.buried({ berm: true, layers: 2, snow: 0.8 }), false);
 

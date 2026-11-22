@@ -1,7 +1,7 @@
-import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain } from './world.js?v=square24';
-import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=age3';
-import { seasonOf, seasonLength, idolDepth } from './water.js?v=square24';
-import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf } from './clearing.js';
+import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain } from './world.js?v=fifty';
+import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=fifty';
+import { seasonOf, seasonLength, idolDepth } from './water.js?v=fifty';
+import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf } from './clearing.js?v=fifty';
 
 const MOSS = { width: 0.045, color: INK.lush, density: 2, emissive: false, depth: true };
 const DEEP = { width: 0.04, color: INK.deep, density: 2, emissive: false, depth: true };
@@ -41,6 +41,7 @@ export function raiseLand(sim, cell, amount) {
 export function compactMound(sim, cell) {
   if (!cell?.berm || cell.rock || cell.hearth) return false;
   cell.rock = true;
+  cell.rockAge = sim.year || 1;
   cell.lift = Math.max(0, Math.round((cell.lift || 0) * 0.35));
   cell.coat = Math.max(1, (cell.coat || 1) * 0.4);
   raiseLand(sim, cell, 0.08);
@@ -85,10 +86,18 @@ export function beginMound(sim, cell, cause, line) {
   cell.growth = hash(cell.i * 19 + cell.k * 7 + cell.coat);
   sim.bedDirty = true;
   sim.seen.add('mound');
-  if (!sim.quiet) sim.motions.push({ kind: 'mound', i: cell.i, k: cell.k, t: 0, dur: 1.25 });
+  if (!sim.quiet && sim.motions) sim.motions.push({ kind: 'mound', i: cell.i, k: cell.k, t: 0, dur: 1.25 });
   offerFruit(sim, cell);
   speak(sim, 'berm', `${line || CAUSE[cause]}${stillWants(cell.marks)}`);
   noteGate(sim, cell);
+  if (cause === 'tend' && !sim.quiet && sim.guide && sim.character?.st && sim.hearth) {
+    const pause = wornMeasures(sim).pause || 0;
+    if (pause > 0.42) {
+      const st = sim.character.st;
+      sim.guide.pauseUntil = (sim.time || 0) + 1.15;
+      sim.guide.goal = { kind: 'look', face: Math.atan2(sim.hearth.z - st.z, sim.hearth.x - st.x) };
+    }
+  }
   return true;
 }
 
@@ -163,7 +172,10 @@ export function updateGrowth(sim, dt) {
       }
     }
     if (cell.nutAt && sim.time - cell.nutAt > YEAR_SPAN * 1.4) sproutNut(sim, cell);
-    if (cell.berm) berms += 1;
+    if (cell.berm) {
+      berms += 1;
+      cell.stood = (cell.stood || 0) + dt;
+    }
   }
   ageRelic(sim);
   updateSquirrels(sim, dt);
@@ -259,33 +271,48 @@ function stackHeight(cell) {
   return stack;
 }
 
-export function settleMounds(sim) {
-  let count = 0;
-  for (const cell of sim.cells || []) {
-    if (!cell.berm || cell.hearth) continue;
-    const gain = brickGain(stackHeight(cell), moundRise(cell));
-    if (gain > 0) {
-      const blocks = blockHeights(cell).slice();
-      blocks.push(gain);
-      cell.cubes = (cell.cubes || 0) + 1;
-      while (blocks.length > DIRT_CAP) cell.sunk = (cell.sunk || 0) + blocks.shift();
-      cell.block = blocks;
-    }
-    cell.berm = false;
-    cell.rock = false;
-    cell.lift = 0;
-    cell.coat = 0;
-    cell.layers = 0;
-    cell.woods = [];
-    cell.settle = 0;
-    cell.stood = 0;
-    count += 1;
+function settleOne(sim, cell) {
+  if (!cell?.berm || cell.hearth) return false;
+  const gain = brickGain(stackHeight(cell), moundRise(cell));
+  if (gain > 0) {
+    const blocks = blockHeights(cell).slice();
+    blocks.push(gain);
+    cell.cubes = (cell.cubes || 0) + 1;
+    if (!cell.rockAge) cell.rockAge = sim.year || 1;
+    while (blocks.length > DIRT_CAP) cell.sunk = (cell.sunk || 0) + blocks.shift();
+    cell.block = blocks;
   }
-  if (!count) return 0;
+  cell.berm = false;
+  cell.rock = false;
+  cell.lift = 0;
+  cell.coat = 0;
+  cell.layers = 0;
+  cell.woods = [];
+  cell.settle = 0;
+  cell.stood = 0;
+  return true;
+}
+
+export function settleMounds(sim) {
+  const ready = (sim.cells || []).filter(cell => cell.berm && !cell.hearth);
+  if (!ready.length) return 0;
+  for (const cell of ready) settleOne(sim, cell);
+  if (!sim.quiet && sim.motions) {
+    ready.forEach((cell, index) => {
+      sim.motions.push({
+        kind: 'dust',
+        t: -index * 0.4,
+        dur: 0.55,
+        x: cell.x,
+        y: cell.elevation + 0.2,
+        z: cell.z
+      });
+    });
+  }
   sim.berms = 0;
   sim.bedDirty = true;
-  speak(sim, 'ground', count === 1 ? 'The mound becomes the ground.' : 'The mounds become the ground.');
-  return count;
+  speak(sim, 'ground', ready.length === 1 ? 'The mound becomes the ground.' : 'The mounds become the ground.');
+  return ready.length;
 }
 
 function columnHeight(cell) {
@@ -394,6 +421,19 @@ function drawCrown(draw, cell) {
   }
   if (cell.rock) {
     draw.streak([cell.x - 0.16, y, cell.z - 0.04], [cell.x + 0.12, y + 0.04, cell.z + 0.05], { ...MOSS, width: 0.05 });
+  }
+  if (cell.berm) {
+    const marks = cell.marks || {};
+    ['tend', 'leaf', 'snow', 'rain'].forEach((key, index) => {
+      const a = index * (Math.PI / 2);
+      const ox = Math.cos(a) * 0.16;
+      const oz = Math.sin(a) * 0.16;
+      const filled = marks[key];
+      draw.point(
+        [cell.x + ox, y + 0.05, cell.z + oz],
+        { width: filled ? 0.032 : 0.016, color: filled ? (BAND[key] ?? INK.lush) : 1, density: 2.2, emissive: false, depth: true }
+      );
+    });
   }
   const story = cell.story || [];
   story.forEach((cause, index) => {
@@ -629,12 +669,29 @@ function updateSquirrels(sim, dt) {
     if (dist < 0.14) {
       const cell = cellAt(sim.cells, squirrel.x, squirrel.z);
       const finger = sim.live?.find(item => item.bit === seasonOf(sim).bit);
-      if (squirrel.plant && cell && nutGround(sim, cell, finger)) {
+      if (squirrel.eat && cell?.nutAt) {
+        cell.nutAt = 0;
+        squirrel.eat = false;
+        squirrel.ateYear = sim.year;
+        if (sim.motions) sim.motions.push({ kind: 'dig', t: 0, dur: 0.6, x: cell.x, y: cell.elevation + 0.08, z: cell.z });
+        speak(sim, 'squirrel', 'A squirrel remembers a nut.');
+      } else if (squirrel.plant && cell && nutGround(sim, cell, finger)) {
         cell.nutAt = sim.time;
         speak(sim, 'squirrel', 'A squirrel plants a nut.');
       }
       squirrel.plant = false;
+      squirrel.eat = false;
       squirrel.pause = 0.7 + hash(sim.time + squirrel.x) * 1.2;
+      if (seasonOf(sim).id === 'WIN' && squirrel.ateYear !== sim.year) {
+        const nuts = sim.cells.filter(item => item.nutAt && sim.time - item.nutAt > 10);
+        if (nuts.length && hash(sim.time * 5 + squirrel.x) > 0.55) {
+          const nut = nuts[Math.floor(hash(sim.time + squirrel.z) * nuts.length)];
+          squirrel.tx = nut.x;
+          squirrel.tz = nut.z;
+          squirrel.eat = true;
+          continue;
+        }
+      }
       const plant = hash(sim.time * 3 + squirrel.z) > 0.42;
       const next = pickSpot(sim, sim.time * 4 + squirrel.hop, plant);
       if (next) {
