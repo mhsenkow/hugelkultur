@@ -15,6 +15,18 @@ function liveGate(sim) {
   return sim.live?.find(item => item.bit === seasonOf(sim).bit) || null;
 }
 
+function wallPinch(sim, cell) {
+  let built = 0;
+  let open = 0;
+  for (const [di, dk] of STEP) {
+    const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+    if (!next) continue;
+    if ((next.cubes || 0) > 0 || next.berm || (next.layers || 0) >= 3) built += 1;
+    else open += 1;
+  }
+  return built >= 2 && open <= 1;
+}
+
 function cling(bit) {
   const min = ORIGIN + 0.35;
   const max = ORIGIN + GRID - 0.35;
@@ -45,6 +57,7 @@ function driftSnow(sim, dt) {
   if (seasonOf(sim).id !== 'WIN' || !sim.hearth) return 0;
   let moved = 0;
   for (const cell of sim.cells) {
+    if (cell.roofed) continue;
     const room = snowRoom(sim, cell);
     if (room <= 0) continue;
     const dist = Math.hypot(cell.i - sim.hearth.i, cell.k - sim.hearth.k);
@@ -199,6 +212,7 @@ export function updateWeather(sim, dt) {
     if (fadeLeaf) cell.litter = Math.max(0, (cell.litter || 0) - fadeLeaf);
     if (!kind || cell.hearth || cell.plot) continue;
     if (cell.parched && kind === 'snow') continue;
+    if (cell.roofed) continue;
     if (cell.layers >= 2 || cell.berm) cell.soak = (cell.soak || 0) + dt;
     const waited = cell.berm ? 8 : 12;
     if ((cell.soak || 0) < waited) continue;
@@ -236,7 +250,8 @@ export function updateWeather(sim, dt) {
       }
       cling(bit);
       const cell = cellAt(sim.cells, bit.x, bit.z);
-      if (cell && gate && Math.hypot(cell.i - gate.gate[0], cell.k - gate.gate[1]) < 1.85) {
+      const narrowRace = cell?.race && wallPinch(sim, cell);
+      if (cell && ((gate && Math.hypot(cell.i - gate.gate[0], cell.k - gate.gate[1]) < 1.85) || narrowRace)) {
         cell.raft = Math.min(2.2, (cell.raft || 0) + 0.5);
         cell.litter = Math.min(1, (cell.litter || 0) + 0.25);
         cell.soak = (cell.soak || 0) + 5;

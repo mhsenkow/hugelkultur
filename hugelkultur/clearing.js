@@ -1,16 +1,24 @@
 // Shared rules for the clearing. The page, the guide, and the tests all read from here.
 
 export const MEASURE_KEYS = [
-  ['gate', 'Gates'],
-  ['wade', 'Wade'],
-  ['shake', 'Shake'],
-  ['eat', 'Eat'],
-  ['knit', 'Knit'],
-  ['dry', 'Dry'],
-  ['crust', 'Crust'],
-  ['love', 'Love'],
-  ['pause', 'Pause']
+  ['gate', 'Gates', 'How hard she works the ring openings where water comes in.'],
+  ['wade', 'Wade', 'How willing she is to build in the wet.'],
+  ['shake', 'Shake', 'How hard she shakes trees for nuts and sticks.'],
+  ['eat', 'Eat', 'How much she seeks ripe fruit and food.'],
+  ['knit', 'Knit', 'How much she packs the mound so it holds and soaks.'],
+  ['dry', 'Dry', 'How much she dries wet stacks, especially in winter.'],
+  ['crust', 'Crust', 'How much she digs under snow and frozen ground.'],
+  ['love', 'Love', 'How much she keeps near the idol and the circle.'],
+  ['pause', 'Pause', 'How often she stops to look when the season does not fit.']
 ];
+
+export const GOD_TIPS = {
+  speed: 'How fast the year runs. The slider is logarithmic; type a number for an exact pace.',
+  climb: 'How fast the year\'s water pressure rises.',
+  home: 'Which season this body fits best.',
+  reset: 'Put every spirit back to its first bend.',
+  same: 'Clear the forest and begin again with the same seed.'
+};
 
 export const DEFAULT_MEASURES = {
   cloud: { gate: 0.86, wade: 0.16, shake: 0.28, eat: 0.34, knit: 0.22, dry: 0.1, crust: 0.16, love: 0.48, pause: 0.36, home: 'SPR' },
@@ -149,7 +157,8 @@ export const WOOD = {
   birch: { weight: 0.5, slide: 0.9, bridge: 0, root: 0, sticks: 1, color: 6, half: 0.44, label: 'birch' },
   willow: { weight: 0.72, slide: 0.18, bridge: 1, root: 0, sticks: 1, color: 9, half: 0.5, label: 'willow' },
   alder: { weight: 0.84, slide: 0.1, bridge: 0, root: 1, sticks: 1, color: 12, half: 0.36, label: 'alder' },
-  maple: { weight: 0.9, slide: 0.28, bridge: 0, root: 0, sticks: 1, color: 10, half: 0.36, label: 'maple' }
+  maple: { weight: 0.9, slide: 0.28, bridge: 0, root: 0, sticks: 1, color: 10, half: 0.36, label: 'maple' },
+  stone: { weight: 1.8, slide: 0.04, bridge: 0, root: 0, sticks: 1, color: 1, half: 0.28, label: 'stone' }
 };
 
 export const OPEN_CROWN = new Set(['maple', 'birch', 'ash', 'willow', 'hemlock', 'alder', 'serviceberry', 'cherry']);
@@ -308,7 +317,7 @@ export function roomsOf(cells, hearthI = 8, hearthK = 8, pad = 1.85) {
       members.push(cell);
       if (cell.hearth) hasHearth = true;
       if (cell.store) hasStore = true;
-      if ((cell.sill || 0) <= -0.55) hasSump = true;
+      if ((cell.sill || 0) <= -0.55 || cell.sump) hasSump = true;
       if (cell.plot || cell.fruit) hasGarden = true;
       if (cell.i === 0 || cell.k === 0 || cell.i === span - 1 || cell.k === span - 1) edge = true;
       for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -463,6 +472,7 @@ export function idolLabel(stage) {
 
 export function yearTitle(chronicle) {
   if (chronicle?.breach) return 'The year the wall broke.';
+  if (chronicle?.heron) return 'The year the heron stayed.';
   if (chronicle?.drank) return 'The year the idol drank.';
   if (chronicle?.circle) return 'The year the circle held.';
   if (chronicle?.room) return 'The year the wall made a room.';

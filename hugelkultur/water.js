@@ -1,5 +1,5 @@
-import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade, HEARTH_I, HEARTH_K } from './world.js?v=hold';
-import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice, eraOf } from './clearing.js?v=hold';
+import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade, HEARTH_I, HEARTH_K, COURT, PAD, hash } from './world.js?v=hold';
+import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice, eraOf, wedgeOf } from './clearing.js?v=hold';
 import { settleMounds, noteEra, raiseLand } from './growth.js?v=hold';
 
 export const SEASON_LENGTH = 52;
@@ -246,9 +246,124 @@ function puffAt(sim, finger, mode, ink) {
   });
 }
 
+const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const FACE_NAME = ['west', 'northwest', 'north', 'northeast', 'east', 'southeast', 'south', 'southwest'];
+
+function wallCell(cell) {
+  if (!cell || cell.hearth) return false;
+  return (cell.cubes || 0) > 0 || !!cell.berm || (cell.layers || 0) >= 3 || !!cell.dam;
+}
+
+function wallNeighbors(sim, cell) {
+  let n = 0;
+  for (const [di, dk] of STEP) {
+    const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+    if (wallCell(next)) n += 1;
+  }
+  return n;
+}
+
+function detectSluices(sim) {
+  for (const cell of sim.cells) {
+    if (cell.hearth || cell.sluice) continue;
+    if (wallCell(cell)) continue;
+    const walls = wallNeighbors(sim, cell);
+    if (walls < 2) continue;
+  const ring = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (ring <= PAD || ring > 6) continue;
+    cell.sluice = 'open';
+    sim.bedDirty = true;
+  }
+}
+
+function turnSluices(sim, seasonId) {
+  for (const cell of sim.cells) {
+    if (!cell.sluice) continue;
+    if (seasonId === 'SUM' && cell.sluice !== 'open') {
+      cell.sluice = 'open';
+      sim.bedDirty = true;
+      if (!sim.quiet) sim.events.push({ type: 'note', text: 'The sluice is open.' });
+    } else if ((seasonId === 'AUT' || seasonId === 'SPR') && cell.sluice === 'open') {
+      cell.sluice = 'shut';
+      sim.bedDirty = true;
+      if (!sim.quiet) sim.events.push({ type: 'note', text: 'The sluice is shut.' });
+    }
+  }
+}
+
+function placeNiche(sim, year, title) {
+  if (!sim.niches) sim.niches = [];
+  const chronicle = sim.chronicle || {};
+  let kind = chronicle.wood || null;
+  if (!kind) {
+    if ((sim.husks || []).length > 4) kind = 'husk';
+    else if (hash(year * 17 + (title || '').length) < 0.34) kind = 'flake';
+    else kind = 'stone';
+  }
+  let best = null;
+  let score = 1e9;
+  for (const cell of sim.cells) {
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist < COURT || dist > COURT + 2.2) continue;
+    if ((cell.cubes || 0) < 1 && !cell.berm) continue;
+    const rank = Math.abs(dist - (COURT + 1)) + (cell.hearth ? 20 : 0);
+    if (rank < score) {
+      score = rank;
+      best = cell;
+    }
+  }
+  if (!best) return;
+  const face = FACE_NAME[wedgeOf(best.i, best.k, HEARTH_I, HEARTH_K)] || 'north';
+  sim.niches.push({ i: best.i, k: best.k, face, kind, year, title: title || '' });
+}
+
+function spawnFloodDebris(sim) {
+  if (sim.loose.length >= 48) return;
+  const finger = sim.live?.find(item => item.bit === seasonOf(sim).bit);
+  if (!finger) return;
+  const cell = sim.cells[finger.gate[1] * GRID + finger.gate[0]]
+    || sim.cells[finger.mouth[1] * GRID + finger.mouth[0]];
+  if (!cell) return;
+  const hit = sim.snapshot?.sample?.(cell.x, cell.z);
+  if (!hit || (hit.depth || 0) < 0.04) return;
+  sim.loose.push({
+    x: cell.x + (hash(sim.time * 3) - 0.5) * 0.3,
+    z: cell.z + (hash(sim.time * 5) - 0.5) * 0.3,
+    y: (hit.level || cell.elevation) + 0.05,
+    yaw: hash(sim.time) * Math.PI,
+    kind: 'oak',
+    age: 0,
+    fall: false,
+    drift: true
+  });
+}
+
+function storeSheltered(sim, cell) {
+  if (!cell) return false;
+  if (cell.roofed) return true;
+  let walls = 0;
+  for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+    if (next && (next.cubes || 0) >= 2) walls += 1;
+  }
+  return walls >= 2;
+}
+
+function closeStoreSeason(sim) {
+  if (!sim.store?.sticks?.length) return;
+  const cell = sim.cells[sim.store.k * GRID + sim.store.i];
+  if (!cell || storeSheltered(sim, cell)) return;
+  const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+  if (depth > 0.03) {
+    sim.store.sticks.pop();
+    if (!sim.quiet) sim.events.push({ type: 'note', text: 'The woodpile loses a stick.' });
+  }
+}
+
 export function closeSeason(sim) {
   const finished = seasonOf(sim);
   rememberWater(sim);
+  closeStoreSeason(sim);
   if (!sim.quiet) {
     const line = idolVoice(sim.seasonPeak || 'dry');
     if (line) sim.events.push({ type: 'idol', text: line });
@@ -260,11 +375,15 @@ export function closeSeason(sim) {
   if ((sim.flood || 0) < 1) sidleGate(sim, finished);
   sim.seasonTime = 0;
   sim.seasonIndex = (sim.seasonIndex + 1) % SEASONS.length;
+  const nextSeason = seasonOf(sim);
+  turnSluices(sim, nextSeason.id);
+  detectSluices(sim);
   const rolled = sim.seasonIndex === 0;
   if (rolled) {
     sim.chronicle.berms = sim.berms || 0;
     if (sim.holding || sim.circleSaid) sim.heldYear = true;
     sim.yearLine = yearTitle(sim.chronicle);
+    placeNiche(sim, sim.year, sim.yearLine);
     noteYear(sim);
     if (!sim.quiet) sim.events.push({ type: 'year', text: sim.yearLine });
     sim.notches = (sim.notches || 0) + 1;
@@ -303,6 +422,7 @@ function markOutlets(sim) {
     if ((cell.sill || 0) > -0.3) continue;
     if (cell.outlet) continue;
     cell.outlet = true;
+    sim.outletsEver = (sim.outletsEver || 0) + 1;
     const edge = cell.k === 0 ? 'N' : cell.k === GRID - 1 ? 'S' : cell.i === 0 ? 'W' : 'E';
     if (sim.chronicle) {
       sim.chronicle.river = true;
@@ -337,7 +457,8 @@ function scourBed(sim, dt) {
     }
     if (speed < 0.03 || depth < 0.04 || cell.ice) continue;
     const worn = cell.worn > 0.6 ? 0.5 : 1;
-    cell.scour = (cell.scour || 0) + speed * worn;
+    const freshet = seasonOf(sim).id === 'SPR' && (sim.seasonTime || 0) < 8 ? 2 : 1;
+    cell.scour = (cell.scour || 0) + speed * worn * freshet;
     if (cell.scour < 1.2) continue;
     cell.scour = 0;
     cell.sill = Math.max(-0.9, (cell.sill || 0) - 0.04);
@@ -406,16 +527,28 @@ export function updateWater(sim, dt) {
   scourBed(sim, tick);
   if (current.id === 'WIN' && (sim.seasonTime || 0) > seasonLength(sim) * 0.1) {
     for (const cell of sim.cells) {
-      const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
-      if (depth > 0.04 && !cell.hearth) cell.ice = true;
+      const hit = sim.snapshot?.sample?.(cell.x, cell.z);
+      const depth = hit?.depth || 0;
+      if (depth > 0.04 && !cell.hearth) {
+        cell.ice = true;
+        if (Number.isFinite(hit?.level)) cell.iceLevel = hit.level;
+      }
     }
   } else if (current.id !== 'WIN') {
     for (const cell of sim.cells) {
       if (!cell.ice) continue;
       cell.ice = false;
+      cell.iceLevel = null;
       cell.thaw = Math.min(0.02, (cell.thaw || 0) + 0.015);
     }
   }
+  if (current.id === 'SPR' && press > 4) {
+    sim.debrisWait = (sim.debrisWait || 0) + tick;
+    if (sim.debrisWait > 5 && hash(Math.floor(sim.time * 4) + sim.year) < 0.12) {
+      sim.debrisWait = 0;
+      spawnFloodDebris(sim);
+    }
+  } else sim.debrisWait = 0;
   noteEra(sim);
 
   const depth = idolDepth(sim);
@@ -449,6 +582,8 @@ export function updateWater(sim, dt) {
   if (sim.flood >= 9) {
     sim.over = true;
     sim.chronicle.drank = true;
+    const seep = sim.cells.some(cell => (cell.burrow || 0) > 0.6 || cell.crack || cell.jam);
+    sim.endCause = seep || sim.chronicle.breach ? 'breach' : 'flood';
     sim.events.push({ type: 'flood', text: 'The idol is wet.' });
   }
 }

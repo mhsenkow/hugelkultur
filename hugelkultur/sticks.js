@@ -475,7 +475,14 @@ function knitWillow(sim, cell) {
   if (sim.weaves.length > 8) sim.weaves.splice(0, sim.weaves.length - 8);
 }
 
+function atStore(sim, stick) {
+  if (!sim.store) return false;
+  const cell = cellAt(sim.cells, stick.x, stick.z);
+  return cell && cell.i === sim.store.i && cell.k === sim.store.k;
+}
+
 function compostStick(sim, stick) {
+  if (atStore(sim, stick)) return;
   const cell = cellAt(sim.cells, stick.x, stick.z);
   if (cell && !cell.hearth) {
     cell.compost = 1;
@@ -742,14 +749,36 @@ export function updateSticks(sim, dt) {
     }
     stick.age = (stick.age || 0) + dt;
     const wood = woodOf(stick.kind);
-    if (wood.slide > 0.6) {
+    const drifting = stick.drift || wood.slide > 0.6;
+    if (drifting) {
       const hit = sim.snapshot?.sample?.(stick.x, stick.z);
       if (hit && hit.depth > 0.05) {
-        stick.x += (hit.velocity?.[0] || 0) * dt * 0.75;
-        stick.z += (hit.velocity?.[1] || 0) * dt * 0.75;
+        const pull = stick.drift ? 1.1 : 0.75;
+        stick.x += (hit.velocity?.[0] || 0) * dt * pull;
+        stick.z += (hit.velocity?.[1] || 0) * dt * pull;
+        if (stick.drift && stick.kind === 'oak') {
+          const cell = cellAt(sim.cells, stick.x, stick.z);
+          if (cell && (cell.river || cell.race)) {
+            let banks = 0;
+            let open = 0;
+            for (const [di, dk] of STEP) {
+              const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+              if (!next) continue;
+              if (next.river || (next.cubes || 0) > 0 || next.berm || next.jam) banks += 1;
+              else open += 1;
+            }
+            if (banks >= 2 && open <= 1 && !cell.jam && !cell.hearth) {
+              cell.jam = true;
+              sim.bedDirty = true;
+              if (!sim.quiet) sim.events.push({ type: 'note', text: 'The river brings a trunk.' });
+              sim.loose.splice(n, 1);
+              continue;
+            }
+          }
+        }
       }
     }
-    if (stick.age > compostAfter) {
+    if (stick.age > compostAfter && !atStore(sim, stick)) {
       compostStick(sim, stick);
       sim.loose.splice(n, 1);
     }
@@ -841,6 +870,8 @@ function placeStick(sim) {
     return;
   }
   addWood(cell, kind);
+  if (sim.guide?.method === 'stair') cell.stair = true;
+  if (sim.guide?.method === 'pave' || kind === 'stone') cell.paved = true;
   sim.carrying = false;
   sim.carryKind = null;
   sim.bedDirty = true;
@@ -919,6 +950,13 @@ export function plantAt(sim, cell) {
       sim.events.push({ type: 'sow', text: 'The mound is not ready.' });
       return false;
     }
+    sim.seeds = sim.seeds || {};
+    const bank = sim.seeds[spec.id] || 0;
+    if (bank < 1) {
+      sim.events.push({ type: 'sow', text: 'No seed kept.' });
+      return false;
+    }
+    sim.seeds[spec.id] = bank - 1;
     cell.fruit = spec.id;
     cell.fruitGrowth = 0.2;
     sim.sow = null;
@@ -928,6 +966,28 @@ export function plantAt(sim, cell) {
   if (cell.hearth || cell.tree || cell.plot || cell.berm || cell.log) {
     sim.events.push({ type: 'sow', text: 'The ground is taken.' });
     return false;
+  }
+  if (spec.id === 'hawthorn') {
+    cell.thorn = true;
+    cell.tree = true;
+    sim.trees.push({
+      i: cell.i,
+      k: cell.k,
+      x: cell.x,
+      z: cell.z,
+      kind: 'hawthorn',
+      size: 0.85,
+      drop: cell.elevation + 0.35,
+      cooldown: 2,
+      planted: true,
+      growth: 0.55,
+      group: 'shrub',
+      seed: 1,
+      rooted: false
+    });
+    sim.sow = null;
+    sim.events.push({ type: 'plant', text: 'You plant hawthorn. The line holds.' });
+    return true;
   }
   const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
   if (spec.group === 'tree' && dist < PAD) {

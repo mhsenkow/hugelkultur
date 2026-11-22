@@ -267,7 +267,7 @@ function pocket(sim) {
 
 function restScale(sim) {
   if (!sim.fast) return 1;
-  return Math.min(8, Math.max(4, sim.speed || 8));
+  return Math.min(120, Math.max(4, (sim.speed || 8) / 4));
 }
 
 function bodyTrapped(sim) {

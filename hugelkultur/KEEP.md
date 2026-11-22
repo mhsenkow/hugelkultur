@@ -75,7 +75,7 @@ Additions for this list:
   fifteen. From the keep era on, halve the yearly climb and let burrows, roots,
   boars, and jams (sections V and VI) be what floods the idol. The figure is lost
   through a hole in the wall, not a wave over it.
-- [ ] 5. **A wall of years.** At the year roll in `closeSeason`, the druid sets one
+- [x] 5. **A wall of years.** At the year roll in `closeSeason`, the druid sets one
   object into the inner face of a wall cube near the court: the wood that took the
   gate (`chronicle.wood`), a husk, a flake, or a stone. Keep
   `sim.niches = [{ i, k, face, kind, year, title }]` and persist it. Draw a dark
@@ -123,26 +123,26 @@ Additions for this list:
   - Winter: standing water past the first tenth of WIN sets `cell.ice`. Ice is
     walkable (`walkHeight` uses the water level), has no scour, and raises friction.
     At the thaw, ice cells let go together as a surge.
-- [ ] 14. **The flood carries debris.** In SPR above pressure 4, the mouth sometimes
+- [x] 14. **The flood carries debris.** In SPR above pressure 4, the mouth sometimes
   delivers a floating oak log, a loose stick with `drift: true` that follows the
   water's velocity the way birch already does. Where two banks pinch, a log lodges
   as `cell.jam` (bed +0.3), which can turn the river into the ring. The druid
   clears a jam with an `unjam` goal that takes the log as carried oak. Line: "The
   river brings a trunk."
-- [ ] 15. **A sump.** When water appears inside the walls, a `sump` method digs one
+- [x] 15. **A sump.** When water appears inside the walls, a `sump` method digs one
   cell inside the ring, as far from the idol as the room allows, to `sill -0.6`, so
   water gathers there and not at the hearth. Draw a dark rim. Silt refills it over
   years, so it needs tending. This is the cistern room of the keep.
-- [ ] 16. **The sluice.** A one-cell gap in a wall can take `cell.sluice` set to
+- [x] 16. **The sluice.** A one-cell gap in a wall can take `cell.sluice` set to
   `'open'` or `'shut'`; `bedHeight` adds 1.2 when shut. The druid opens it in SUM to
   empty the court and the sump, and shuts it at the turn into AUT and SPR. Draw two
   oak posts and a crossbar at the height it sits. Lines: "The sluice is open." / "The
   sluice is shut." This is the keep's first machine and its first portcullis.
-- [ ] 17. **Weirs.** Two layers across a race hold a pond upstream and pass the flood
+- [x] 17. **Weirs.** Two layers across a race hold a pond upstream and pass the flood
   over the top. The guide places one where a race crosses low ground. When depth
   over the weir exceeds its bed, draw white spill dashes, reusing the mouth-foam
   stroke. A weir pond is where the heron stands (item 40).
-- [ ] 18. **The river has a voice.** Next to `keepDrone` in `main.js`, run a
+- [x] 18. **The river has a voice.** Next to `keepDrone` in `main.js`, run a
   low-passed noise buffer whose gain follows the summed depth at `outlet` cells
   (≤ 0.015). It goes silent under ice. A held river sounds like it is leaving.
 
@@ -154,16 +154,16 @@ Additions for this list:
   store (the woodpile), cistern (the sump), garden (plots or fruit), and hall for
   anything else. Recompute at each season turn. When a new room closes: "The wall
   makes a room." Unit test the fill.
-- [ ] 20. **Doors.** A one-cell gap between two wall cells is a doorway. The druid
+- [x] 20. **Doors.** A one-cell gap between two wall cells is a doorway. The druid
   lays an oak lintel across it (`cell.lintel`), drawn at the height of the wall top,
   and can hang a willow hurdle (`cell.hurdle`) that stops beasts and people but
   passes her and passes water. With a lintel the gap is a room's door; without one
   it is a breach.
-- [ ] 21. **Stairs that stay.** The `stair` method lays stacks to climb. Mark those
+- [x] 21. **Stairs that stay.** The `stair` method lays stacks to climb. Mark those
   cells `cell.stair`, draw stick ends in steps, and have `settleOne` turn a stair into
   a half-height brick (draw with `scaleY` 0.5 in `putBrick`). Years of stairs become
   a stone staircase.
-- [ ] 22. **Walls show their years.** In `drawRises`, put a thin seam line between
+- [x] 22. **Walls show their years.** In `drawRises`, put a thin seam line between
   stacked bricks on the two faces toward the camera, offset every other course. Tint
   each course with the band color (`BAND` in `growth.js`) of the cause that made that
   year's mound. Then the inside of a wall reads like the strata on the side of the
@@ -180,11 +180,11 @@ Additions for this list:
 - [x] 25. **Worn paths.** Add `dt` to `cell.worn` wherever she walks. Past a
   threshold, draw packed pale ground. A worn cell refuses nuts and saplings
   (`openGround`) and scours at half rate. Her habits become the corridors.
-- [ ] 26. **Flagstones.** When `settleOne` settles a `rock` cell, it yields a flag:
+- [x] 26. **Flagstones.** When `settleOne` settles a `rock` cell, it yields a flag:
   a new carry kind, `stone`, with weight 1.8 and the oak slowdown. The guide's `pave`
   method lays flags on the most worn cells and on door sills (`cell.paved`). Paved
   cells take no scour, no burrow, and no hoofprints.
-- [ ] 27. **The wall walk.** Once a ring of equal-height wall exists, let pathing
+- [x] 27. **The wall walk.** Once a ring of equal-height wall exists, let pathing
   follow wall tops; stairs are the way up. At dusk, before going home, she stands one
   breath on the highest wall facing the live gate (a `look` goal). Line: "She keeps
   the wall."
@@ -197,19 +197,19 @@ Additions for this list:
   surplus there. In WIN, when nothing is loose, she draws from the pile before she
   digs in snow. Draw crossed sticks in the wood's color. Lines: "You keep wood for
   winter." / "You take from the store."
-- [ ] 29. **Kept wood keeps.** Sticks in the pile never compost. A wet pile (depth
+- [x] 29. **Kept wood keeps.** Sticks in the pile never compost. A wet pile (depth
   over 0.03) loses one stick a season. A roofed pile (a wall of two cubes on two
   sides, or canopy, item 46) loses nothing. The fire body standing by the pile marks
   it `parched`. Where you build the store matters.
-- [ ] 30. **The root cellar.** A ripe crop she does not eat (eat measure under 0.5)
+- [x] 30. **The root cellar.** A ripe crop she does not eat (eat measure under 0.5)
   goes into a cellar cut into the inner face of a wall cube (`cell.cellar`, up to six
   crops). In WIN, with the beds bare, she eats from it. Draw a dark mouth in the wall
   with a crop glyph from `paintCrop`. The store becomes a room of the keep.
-- [ ] 31. **The seed bank.** Each mound that completes all four marks leaves one
+- [x] 31. **The seed bank.** Each mound that completes all four marks leaves one
   seed in `sim.seeds[kind]`. Planting a crop from the Flora panel spends a seed; with
   none, the button reads "No seed kept." The snow body can raid an old squirrel cache
   (`cell.nutAt`) in WIN for an oak seed. The library gets stakes.
-- [ ] 32. **The shelf.** When husks go past twelve, move the oldest into a court
+- [x] 32. **The shelf.** When husks go past twelve, move the oldest into a court
   niche (item 5) instead of dropping it. The idol's foot stays clean and the history
   goes into the wall. Fold the two husk paths together while here: `gardens.js`
   pushes husks inline, and `offerHusk` in `signs.js` is exported but never called.
@@ -235,19 +235,19 @@ Additions for this list:
   `story` cause, clears that mark, and lowers `coat` by one. On a ring berm it can
   knock a mound down to two layers, which is a breach. Rock and cubes stop it. Dust
   motions where it digs. Line: "A boar turns the mound." It is the loudest enemy.
-- [ ] 37. **Moles.** From the keep era on, a mole settles under a wall cell that has
+- [x] 37. **Moles.** From the keep era on, a mole settles under a wall cell that has
   standing water beside it, adding to `cell.burrow`. Past a threshold, the cell's
   `sill` drops 0.25 and water seeps under. Line: "The wall weeps." The knit measure
   undoes a burrow, and paving prevents one. This is the late-game leak, and
   `leakPlug` in `guide.js` should find it.
-- [ ] 38. **Crows.** In AUT and WIN, crows land on loose sticks, husks, and an
+- [x] 38. **Crows.** In AUT and WIN, crows land on loose sticks, husks, and an
   unroofed woodpile and carry one to a treetop, sometimes beyond the cube. Sometimes
   one drops a stick from beyond the cube instead. She shoos them by walking near.
   Line: "A crow takes a stick." / "A crow brings a stick."
-- [ ] 39. **Fox.** At dusk, a fox hunts squirrels; a caught squirrel is one fewer
+- [x] 39. **Fox.** At dusk, a fox hunts squirrels; a caught squirrel is one fewer
   planter this year, and squirrels avoid cells near it. It dens in a hollow on 32 and
   64 grids (`sim.hollows`). Line: "A fox keeps the hollow."
-- [ ] 40. **Heron.** In SUM, a heron stands on a weir pond or pool with depth between
+- [x] 40. **Heron.** In SUM, a heron stands on a weir pond or pool with depth between
   0.04 and 0.12, and leaves if the water dries. It does no work. It is the sign that
   the river is right, and it can title the year: "The year the heron stayed."
 - [x] 41. **The wanderer.** Rare, at dusk, from the keep era on. A hooded figure (a
@@ -257,28 +257,28 @@ Additions for this list:
   court is neglected, it takes the newest sprout leaf (one fewer year leaf from
   `drawIdolLife`): "A stranger takes a leaf." Doors and walls are what keep the relic
   from people. This is the threat to the relic that is not water.
-- [ ] 42. **Bees in the wall.** In SUM during the keep era, a wall niche on a sunny
+- [x] 42. **Bees in the wall.** In SUM during the keep era, a wall niche on a sunny
   face can host a swarm. Fruit within three cells grows ×1.5. If she pulls from that
   wall by day: "The bees warn her." A wall can be alive.
 
 ## VI. Growth that builds and breaks
 
-- [ ] 43. **Ivy.** Cubes older than three years grow ivy up their north face, one
+- [x] 43. **Ivy.** Cubes older than three years grow ivy up their north face, one
   streak per year up to the column's height, extending `drawMossedStone` in
   `signs.js`. Ivied cells resist burrows and boars. Old walls bind themselves.
-- [ ] 44. **Trees on walls, roots that split them.** Let `nutGround` accept cube tops
+- [x] 44. **Trees on walls, roots that split them.** Let `nutGround` accept cube tops
   of two or more. A tree on a wall binds it for years, but once its growth passes two
   it splits the column: the top brick is lost and the cell gets `cell.crack`, which
   seeps like a burrow. A `prune` goal takes two sticks and holds growth back. Prune
   it or let it go.
-- [ ] 45. **Thorn.** Add a hawthorn shrub to `species.js`. Planted in a line, it stops
+- [x] 45. **Thorn.** Add a hawthorn shrub to `species.js`. Planted in a line, it stops
   beasts and slows people, passes water, and gives crows fewer places to land. It is
   the first barrier that is not about water.
-- [ ] 46. **The canopy becomes a roof.** A court cell under two or more crowns with
+- [x] 46. **The canopy becomes a roof.** A court cell under two or more crowns with
   growth over two is `roofed`: no snow drift, no leaf fall, a darker veil, and
   mushrooms seed themselves. The undercroft's ceiling is alive, which completes the
   last era in item 1.
-- [ ] 47. **Light in the dark rooms.** In roofed, damp rooms, glowing fungus clusters
+- [x] 47. **Light in the dark rooms.** In roofed, damp rooms, glowing fungus clusters
   grow (the `FUNGI` stroke from `growth.js`, emissive), the dungeon's own lamps. The
   fire body sets embers on wall tops at dusk that burn through the night (an emissive
   point pulsing like the idol's heart) and are gone by dawn. The keep glows from
@@ -286,7 +286,7 @@ Additions for this list:
 
 ## VII. Reading the keep
 
-- [ ] 48. **The ledger.** Add a third dock beside Flora and Spirits, called Keep: a
+- [x] 48. **The ledger.** Add a third dock beside Flora and Spirits, called Keep: a
   top-down 2D canvas map of the cube with cells shaded by height band, rooms outlined
   and named, outlets and races in water blue, the store's contents, this year's
   visitors, and the niches as a list. The plan view of the dungeon.
@@ -295,7 +295,7 @@ Additions for this list:
   river, visitor, then the current fallbacks. Examples: "The year the wall broke."
   "The year the wall made a room." "The year the river turned west." "The year the
   boar came." Test the order in `clearing-rules.test.js`.
-- [ ] 50. **The end card reads a keep.** Beside Years, Cubes, and Gates, add Rooms,
+- [x] 50. **The end card reads a keep.** Beside Years, Cubes, and Gates, add Rooms,
   Rivers (outlets ever opened), and Visitors. Change the eyebrow by the end's cause:
   "The idol went under" for a flood over the top, and "The wall gave way" when the
   last water came through a burrow, crack, or boar breach.

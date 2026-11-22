@@ -17,7 +17,10 @@ function cellRow(cell) {
     || (cell.litter || 0) > 0.2 || (cell.snow || 0) > 0.2
     || (cell.moisture || 0) > 0.4 || cell.oldGate || cell.dam || cell.rockAge
     || cell.outlet || cell.race || cell.river || cell.store || cell.scour || cell.silt
-    || cell.worn || cell.ice || cell.jam || cell.sluice || cell.hurdle || cell.lintel || cell.burrow;
+    || cell.worn || cell.ice || cell.jam || cell.sluice || cell.hurdle || cell.lintel || cell.burrow
+    || cell.stair || cell.paved || cell.sump || cell.weir || (cell.cellar?.length) || cell.crack || cell.thorn || cell.roofed
+    || cell.ivy || cell.bees || (cell.embers || 0) > 0.1
+    || cell.channel;
   if (!lived) return null;
   return {
     i: cell.i,
@@ -67,7 +70,19 @@ function cellRow(cell) {
     sluice: cell.sluice || null,
     hurdle: !!cell.hurdle,
     lintel: !!cell.lintel,
-    burrow: cell.burrow || 0
+    burrow: cell.burrow || 0,
+    stair: !!cell.stair,
+    paved: !!cell.paved,
+    sump: !!cell.sump,
+    weir: !!cell.weir,
+    cellar: Array.isArray(cell.cellar) ? cell.cellar.slice() : null,
+    crack: !!cell.crack,
+    thorn: !!cell.thorn,
+    roofed: !!cell.roofed,
+    ivy: cell.ivy || 0,
+    bees: !!cell.bees,
+    embers: cell.embers || 0,
+    channel: !!cell.channel
   };
 }
 
@@ -172,7 +187,12 @@ export function snapshotForest(sim, seed) {
     store: sim.store ? { i: sim.store.i, k: sim.store.k, sticks: (sim.store.sticks || []).slice() } : null,
     visited: sim.visited || {},
     roomCount: sim.roomCount || 0,
-    yearLeaves: sim.yearLeaves ?? Math.max(0, (sim.year || 1) - 1)
+    yearLeaves: sim.yearLeaves ?? Math.max(0, (sim.year || 1) - 1),
+    niches: (sim.niches || []).slice(),
+    seeds: sim.seeds && typeof sim.seeds === 'object' ? { ...sim.seeds } : {},
+    hollows: Array.isArray(sim.hollows) ? sim.hollows.slice() : [],
+    outletsEver: sim.outletsEver || 0,
+    endCause: sim.endCause || null
   };
 }
 
@@ -270,6 +290,18 @@ export function applyForest(sim, saved) {
     cell.hurdle = !!row.hurdle;
     cell.lintel = !!row.lintel;
     cell.burrow = row.burrow || 0;
+    cell.stair = !!row.stair;
+    cell.paved = !!row.paved;
+    cell.sump = !!row.sump;
+    cell.weir = !!row.weir;
+    cell.cellar = Array.isArray(row.cellar) ? row.cellar.slice() : [];
+    cell.crack = !!row.crack;
+    cell.thorn = !!row.thorn;
+    cell.roofed = !!row.roofed;
+    cell.ivy = row.ivy || 0;
+    cell.bees = !!row.bees;
+    cell.embers = row.embers || 0;
+    if (row.channel) cell.channel = true;
     if (row.tree) cell.tree = true;
   }
   sim.era = saved.era || 'glade';
@@ -282,6 +314,11 @@ export function applyForest(sim, saved) {
   sim.visited = saved.visited && typeof saved.visited === 'object' ? { ...saved.visited } : {};
   sim.roomCount = saved.roomCount || 0;
   sim.yearLeaves = Number.isFinite(saved.yearLeaves) ? saved.yearLeaves : Math.max(0, (sim.year || 1) - 1);
+  sim.niches = Array.isArray(saved.niches) ? saved.niches.slice() : [];
+  sim.seeds = saved.seeds && typeof saved.seeds === 'object' ? { ...saved.seeds } : {};
+  sim.hollows = Array.isArray(saved.hollows) ? saved.hollows.slice() : [];
+  sim.outletsEver = Number.isFinite(saved.outletsEver) ? saved.outletsEver : 0;
+  sim.endCause = saved.endCause === 'breach' || saved.endCause === 'flood' ? saved.endCause : null;
   if (Array.isArray(saved.loose)) {
     sim.loose = saved.loose.map(stick => ({
       x: stick.x,
@@ -408,6 +445,7 @@ export function passSeason(sim) {
     stick.age = (stick.age || 0) + waited;
     if (stick.age <= waited * 2) continue;
     const cell = cellAt(sim.cells, stick.x, stick.z);
+    if (sim.store && cell && cell.i === sim.store.i && cell.k === sim.store.k) continue;
     if (cell && !cell.hearth) {
       cell.compost = 1;
       cell.moisture = 1;

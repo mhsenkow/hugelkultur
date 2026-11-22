@@ -21,6 +21,7 @@ export const FLORA = [
   { id: 'chestnut', name: 'American chestnut', group: 'tree', swatch: '#e6bc82', note: 'Wide and sweet.' },
   { id: 'serviceberry', name: 'Serviceberry', group: 'tree', swatch: '#f4c56a', note: 'Early white bloom.' },
   { id: 'hazel', name: 'Beaked hazel', group: 'shrub', swatch: '#4fd18b', note: 'A low thicket.' },
+  { id: 'hawthorn', name: 'Hawthorn', group: 'shrub', swatch: '#8d5b4c', note: 'A thorn line. Beasts stop.' },
   { id: 'elder', name: 'Elder', group: 'shrub', swatch: '#e0a04a', note: 'Hollow stems.' },
   { id: 'fern', name: 'Cinnamon fern', group: 'plant', swatch: '#2f8f55', note: 'A damp frond.' },
   { id: 'ginger', name: 'Wild ginger', group: 'plant', swatch: '#5a3e2e', note: 'A ground leaf.' }

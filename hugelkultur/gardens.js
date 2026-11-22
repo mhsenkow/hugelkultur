@@ -56,7 +56,18 @@ export function layGardens(cells, beds = BEDS) {
 export function updateGardens(sim, dt, playerDriving) {
   if (sim.over) return;
   for (const plot of sim.plots) {
-    if (plot.growth < 1) plot.growth = Math.min(1, plot.growth + dt * GROW);
+    if (plot.growth < 1) {
+      let rate = GROW;
+      for (const cell of sim.cells || []) {
+        if (!cell.bees) continue;
+        const gap = Math.hypot(cell.i - plot.i, cell.k - plot.k);
+        if (gap <= 3) {
+          rate *= 1.5;
+          break;
+        }
+      }
+      plot.growth = Math.min(1, plot.growth + dt * rate);
+    }
   }
   if (sim.haste > 0) {
     sim.haste -= dt;
@@ -86,6 +97,12 @@ export function updateGardens(sim, dt, playerDriving) {
       const body = sim.character?.st;
       if (hearth && body && Math.hypot(body.x - hearth.x, body.z - hearth.z) <= 2.55) {
         sim.husks = sim.husks || [];
+        if (sim.husks.length >= 12) {
+          sim.niches = sim.niches || [];
+          sim.husks.shift();
+          sim.niches.push({ i: 8, k: 8, face: 'court', kind: 'husk', year: sim.year || 1, title: sim.yearLine || '' });
+          if (sim.niches.length > 12) sim.niches.shift();
+        }
         const n = sim.husks.length + 1;
         sim.husks.push({
           x: hearth.x + (((n * 17) % 10) / 10 - 0.5) * 0.42,

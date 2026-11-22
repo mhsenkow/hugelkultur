@@ -33,12 +33,47 @@ export function offerHusk(sim) {
   if (!hearth || !st) return;
   if (Math.hypot(st.x - hearth.x, st.z - hearth.z) > COURT) return;
   sim.husks = sim.husks || [];
+  if (sim.husks.length >= 12) {
+    sim.niches = sim.niches || [];
+    sim.husks.shift();
+    sim.niches.push({
+      i: HEARTH_I,
+      k: HEARTH_K,
+      face: 'court',
+      kind: 'husk',
+      year: sim.year || 1,
+      title: sim.yearLine || ''
+    });
+    if (sim.niches.length > 12) sim.niches.shift();
+  }
   const n = sim.husks.length + 1;
   capPush(sim.husks, {
     x: hearth.x + (hash(n * 11 + sim.time) - 0.5) * 0.42,
     z: hearth.z + (hash(n * 19 + 3) - 0.5) * 0.42,
     yaw: hash(n * 7) * Math.PI
   }, 12);
+}
+
+export function storeSheltered(sim, cell) {
+  if (!cell) return false;
+  if (cell.roofed) return true;
+  let walls = 0;
+  for (const [di, dk] of STEP) {
+    const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+    if (next && (next.cubes || 0) >= 2) walls += 1;
+  }
+  return walls >= 2;
+}
+
+export function closeStoreSeason(sim) {
+  if (!sim.store?.sticks?.length) return;
+  const cell = sim.cells[sim.store.k * GRID + sim.store.i];
+  if (!cell || storeSheltered(sim, cell)) return;
+  const depth = waterAt(sim, cell.x, cell.z)?.depth || 0;
+  if (depth > 0.03) {
+    sim.store.sticks.pop();
+    if (!sim.quiet) sim.events.push({ type: 'note', text: 'The woodpile loses a stick.' });
+  }
 }
 
 export function updateSigns(sim, dt) {
@@ -50,6 +85,26 @@ export function updateSigns(sim, dt) {
   updateTraces(sim, dt);
   updateDream(sim);
   updateFlies(sim);
+  tendStoreParched(sim);
+  warnBees(sim);
+}
+
+function tendStoreParched(sim) {
+  if (sim.spiritId !== 'fire' || !sim.store) return;
+  const cell = sim.cells[sim.store.k * GRID + sim.store.i];
+  const st = sim.character?.st;
+  if (!cell || !st) return;
+  if (Math.hypot(st.x - cell.x, st.z - cell.z) < 1.3) cell.parched = true;
+}
+
+function warnBees(sim) {
+  if (seasonOf(sim).id !== 'SUM') return;
+  const st = sim.character?.st;
+  if (!st || ((sim.time || 0) % 64) / 64 < 0.35 || ((sim.time || 0) % 64) / 64 > 0.85) return;
+  const here = cellAt(sim.cells, st.x, st.z);
+  if (!here?.bees || (sim._beeWarn || 0) > sim.time) return;
+  sim._beeWarn = sim.time + 12;
+  if (!sim.quiet) sim.events.push({ type: 'note', text: 'The bees warn her.' });
 }
 
 function updateRooms(sim) {
@@ -156,6 +211,7 @@ export function drawSigns(draw, sim) {
   drawOutlets(draw, sim);
   drawRaces(draw, sim);
   drawStore(draw, sim);
+  drawCellars(draw, sim);
   drawWorn(draw, sim);
   drawSummerMemory(draw, sim);
   drawFrost(draw, sim);
@@ -171,6 +227,140 @@ export function drawSigns(draw, sim) {
   drawPocket(draw, sim);
   drawFlies(draw, sim);
   drawStrata(draw, sim);
+  drawNiches(draw, sim);
+  drawSumps(draw, sim);
+  drawSluices(draw, sim);
+  drawWeirs(draw, sim);
+  drawDoors(draw, sim);
+  drawPaved(draw, sim);
+  drawJams(draw, sim);
+}
+
+const FACE_YAW = {
+  west: Math.PI,
+  east: 0,
+  north: -Math.PI / 2,
+  south: Math.PI / 2,
+  northwest: -Math.PI * 0.75,
+  northeast: -Math.PI / 4,
+  southwest: Math.PI * 0.75,
+  southeast: Math.PI / 4
+};
+
+function nicheColor(kind) {
+  if (kind === 'husk') return INK.bark;
+  if (kind === 'flake') return INK.brass;
+  if (kind === 'stone') return 1;
+  const wood = woodOf(kind);
+  return wood?.color ?? INK.stick;
+}
+
+function drawNiches(draw, sim) {
+  let n = 0;
+  for (const niche of sim.niches || []) {
+    if (n >= 24) break;
+    const cell = sim.cells[niche.k * GRID + niche.i];
+    if (!cell) continue;
+    n += 1;
+    const yaw = FACE_YAW[niche.face] ?? 0;
+    const y = walkHeight(cell) + 0.12;
+    const px = Math.cos(yaw) * 0.22;
+    const pz = Math.sin(yaw) * 0.22;
+    draw.point([cell.x + px * 0.55, y - 0.04, cell.z + pz * 0.55], stroke(INK.charcoal, 0.03, { density: 2.8 }));
+    draw.point([cell.x + px, y, cell.z + pz], stroke(nicheColor(niche.kind), 0.024, { density: 2.4 }));
+  }
+}
+
+function drawSumps(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.sump || n >= 12) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.02;
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2;
+      const a1 = ((i + 1) / 6) * Math.PI * 2;
+      draw.streak(
+        [cell.x + Math.cos(a0) * 0.26, y, cell.z + Math.sin(a0) * 0.26],
+        [cell.x + Math.cos(a1) * 0.26, y, cell.z + Math.sin(a1) * 0.26],
+        stroke(INK.charcoal, 0.022, { density: 2.4 })
+      );
+    }
+  }
+}
+
+function drawSluices(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.sluice || n >= 8) continue;
+    n += 1;
+    const y = bedHeight(cell) + (cell.sluice === 'shut' ? 0.6 : 0.35);
+    const post = stroke(5, 0.04);
+    draw.streak([cell.x - 0.12, y, cell.z - 0.08], [cell.x - 0.12, y + 0.45, cell.z - 0.08], post);
+    draw.streak([cell.x + 0.12, y, cell.z + 0.08], [cell.x + 0.12, y + 0.45, cell.z + 0.08], post);
+    draw.streak([cell.x - 0.14, y + 0.42, cell.z - 0.1], [cell.x + 0.14, y + 0.42, cell.z + 0.1], stroke(INK.stick, 0.035));
+  }
+}
+
+function drawWeirs(draw, sim) {
+  for (const cell of sim.cells) {
+    if (!cell.weir) continue;
+    const hit = waterAt(sim, cell.x, cell.z);
+    const depth = hit?.depth || 0;
+    const spill = depth > Math.max(0.02, bedHeight(cell) - cell.elevation - 0.05);
+    if (!spill) continue;
+    const y = (hit?.level || cell.elevation) + 0.04;
+    for (let i = 0; i < 4; i++) {
+      const j = (hash(cell.i * 3 + i + sim.time) - 0.5) * 0.12;
+      draw.streak([cell.x + j, y, cell.z - 0.1], [cell.x + j + 0.08, y + 0.01, cell.z + 0.12], stroke(6, 0.02, { density: 1.4 }));
+    }
+  }
+}
+
+function drawDoors(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (n >= 16) break;
+    if (!cell.lintel && !cell.hurdle) continue;
+    n += 1;
+    const y = walkHeight(cell) + (cell.cubes ? (cell.cubes || 0) * 0.5 : 0.55);
+    if (cell.lintel) {
+      draw.streak([cell.x - 0.22, y, cell.z], [cell.x + 0.22, y + 0.02, cell.z], stroke(5, 0.042));
+    }
+    if (cell.hurdle) {
+      const hy = cell.elevation + 0.12;
+      for (let i = 0; i < 5; i++) {
+        const t = i / 5;
+        draw.streak(
+          [cell.x - 0.2 + t * 0.4, hy + i * 0.04, cell.z - 0.06],
+          [cell.x - 0.18 + t * 0.36, hy + 0.02 + i * 0.04, cell.z + 0.06],
+          stroke(9, 0.022)
+        );
+      }
+    }
+  }
+}
+
+function drawPaved(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.paved || cell.hearth || n >= 32) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.015;
+    draw.streak(
+      [cell.x - 0.2, y, cell.z - 0.14],
+      [cell.x + 0.18, y, cell.z + 0.16],
+      stroke(INK.sand, 0.06, { density: 2.2 })
+    );
+  }
+}
+
+function drawJams(draw, sim) {
+  for (const cell of sim.cells) {
+    if (!cell.jam) continue;
+    const y = walkHeight(cell) + 0.1;
+    draw.streak([cell.x - 0.28, y, cell.z], [cell.x + 0.3, y + 0.03, cell.z + 0.04], stroke(5, 0.05));
+  }
 }
 
 function drawOutlets(draw, sim) {
@@ -484,21 +674,37 @@ function drawAlder(draw, sim) {
   }
 }
 
+function drawCellars(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    const stash = cell.cellar;
+    if (!stash?.length || n >= 10) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.18;
+    draw.streak([cell.x - 0.06, y, cell.z - 0.14], [cell.x + 0.1, y - 0.04, cell.z - 0.1], stroke(INK.charcoal, 0.06, { density: 2.2 }));
+    const crop = stash[stash.length - 1];
+    draw.point([cell.x + 0.04, y - 0.02, cell.z - 0.08], stroke(crop === 'carrot' ? 10 : crop === 'turnip' ? 6 : 14, 0.035));
+  }
+}
+
 function drawMossedStone(draw, sim) {
   let n = 0;
   for (const cell of sim.cells) {
+    const ivy = cell.ivy || 0;
     const age = cell.rock ? (sim.year || 1) - (cell.rockAge || sim.year || 1) : (cell.cubes ? (sim.year || 1) - (cell.rockAge || sim.year || 1) : 0);
-    const streaks = Math.min(4, Math.max(0, age));
+    const mossStreaks = Math.min(4, Math.max(0, age));
+  const streaks = Math.max(mossStreaks, ivy);
     if (!streaks || n >= 20) continue;
     if (!cell.rock && !(cell.cubes > 0)) continue;
     n += 1;
     const y = walkHeight(cell) + 0.04;
     for (let i = 0; i < streaks; i++) {
       const ox = (hash(cell.i * 3 + i) - 0.5) * 0.16;
+      const ink = i < ivy ? INK.lush : INK.moss;
       draw.streak(
         [cell.x + ox - 0.08, y + i * 0.03, cell.z - 0.16],
         [cell.x + ox + 0.05, y + 0.02 + i * 0.03, cell.z - 0.02],
-        stroke(INK.moss, 0.03, { density: 1.8 })
+        stroke(ink, 0.03, { density: 1.8 })
       );
     }
   }

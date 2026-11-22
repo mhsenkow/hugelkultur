@@ -1,9 +1,10 @@
 import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, hash, cellAt, walkHeight, INK } from './world.js?v=hold';
 import { seasonOf } from './water.js?v=hold';
-import { stops, eraOf, fernCount } from './clearing.js?v=hold';
+import { stops, eraOf, fernCount, wallHeight } from './clearing.js?v=hold';
+import { storeSheltered } from './signs.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-const MAX = 2;
+const MAX = 3;
 
 function speak(sim, text, type = 'note') {
   if (!sim.quiet) sim.events.push({ type, text });
@@ -20,7 +21,7 @@ function neighbors(cell) {
 }
 
 function barrierOf(kind) {
-  if (kind === 'deer' || kind === 'boar' || kind === 'fox') return 'beast';
+  if (kind === 'deer' || kind === 'boar' || kind === 'fox' || kind === 'crow' || kind === 'mole') return 'beast';
   if (kind === 'wanderer') return 'people';
   return 'beast';
 }
@@ -177,9 +178,100 @@ function actDeer(sim, visitor) {
   else visitor.until = sim.time;
 }
 
+function depthAt(sim, x, z) {
+  return sim.snapshot?.sample?.(x, z)?.depth || 0;
+}
+
+function hollowsOf(sim) {
+  if (sim.hollows?.length) return sim.hollows;
+  return sim.cells.filter(cell => cell.hollow).map(cell => ({ i: cell.i, k: cell.k, r: 2.6 }));
+}
+
+function wallWithWetNeighbor(sim) {
+  for (const cell of sim.cells) {
+    if (wallHeight(cell) < 0.9 || cell.paved || (cell.ivy || 0) > 0) continue;
+    let wet = false;
+    for (const index of neighbors(cell)) {
+      const next = sim.cells[index];
+      if (!next) continue;
+      const depth = depthAt(sim, next.x, next.z);
+      if (depth > 0.03 || (next.moisture || 0) > 0.5) wet = true;
+    }
+    if (wet) return cell;
+  }
+  return null;
+}
+
+function pickPond(sim) {
+  let best = null;
+  let score = -1;
+  for (const cell of sim.cells) {
+    const depth = depthAt(sim, cell.x, cell.z);
+    if (depth < 0.04 || depth > 0.12) continue;
+    const value = depth * 10 + (cell.weir ? 2 : 0);
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function crowLoot(sim, visitor) {
+  const here = cellAt(sim.cells, visitor.x, visitor.z);
+  if (!here) return false;
+  if (here.thorn) return false;
+  if (sim.store && !storeSheltered(sim, sim.cells[sim.store.k * GRID + sim.store.i])) {
+    const store = sim.cells[sim.store.k * GRID + sim.store.i];
+    if (here === store && (sim.store.sticks || []).length) {
+      sim.store.sticks.pop();
+      visitor.carry = true;
+      speak(sim, 'A crow takes a stick.');
+      return true;
+    }
+  }
+  const stick = (sim.loose || []).find(item => !item.fall && Math.hypot(item.x - visitor.x, item.z - visitor.z) < 0.55);
+  if (stick) {
+    const index = sim.loose.indexOf(stick);
+    if (index >= 0) sim.loose.splice(index, 1);
+    visitor.carry = true;
+    speak(sim, 'A crow takes a stick.');
+    return true;
+  }
+  const husk = (sim.husks || []).find(item => Math.hypot(item.x - visitor.x, item.z - visitor.z) < 0.5);
+  if (husk) {
+    sim.husks = sim.husks.filter(item => item !== husk);
+    visitor.carry = true;
+    speak(sim, 'A crow takes a stick.');
+    return true;
+  }
+  return false;
+}
+
+function dropStickBeyond(sim, visitor) {
+  if (!visitor.carry) return;
+  const edge = edgeCell(sim, hash(sim.time * 5 + visitor.x));
+  if (!edge) return;
+  sim.loose = sim.loose || [];
+  sim.loose.push({
+    x: edge.x,
+    z: edge.z,
+    yaw: hash(sim.time) * Math.PI,
+    kind: 'birch',
+    age: 0,
+    fall: false
+  });
+  visitor.carry = false;
+  speak(sim, 'A crow brings a stick.');
+}
+
 function actBoar(sim, visitor) {
   const cell = cellAt(sim.cells, visitor.x, visitor.z);
   if (!cell || Math.hypot(visitor.x - visitor.tx, visitor.z - visitor.tz) > 0.45) return;
+  if ((cell.ivy || 0) > 0) {
+    visitor.until = sim.time;
+    return;
+  }
   if (cell.berm && !cell.rock) {
     const story = cell.story || [];
     if (story.length) {
@@ -231,6 +323,82 @@ function actWanderer(sim, visitor) {
   visitor.until = sim.time;
 }
 
+function actMole(sim, visitor) {
+  const cell = cellAt(sim.cells, visitor.x, visitor.z);
+  if (!cell || cell.paved) {
+    visitor.until = sim.time;
+    return;
+  }
+  cell.burrow = (cell.burrow || 0) + 0.22;
+  if (cell.burrow > 1) {
+    cell.burrow = 1;
+    cell.sill = Math.max(-0.9, (cell.sill || 0) - 0.25);
+    sim.bedDirty = true;
+    if (sim.chronicle) sim.chronicle.breach = true;
+    speak(sim, 'The wall weeps.');
+  }
+  visitor.until = sim.time + 1;
+}
+
+function actCrow(sim, visitor) {
+  if (visitor.carry && visitor.intent === 'nest') {
+    const trees = (sim.trees || []).filter(tree => !tree.fallen && tree.group !== 'plant');
+    const tree = trees[Math.floor(hash(sim.time + visitor.x) * trees.length)];
+    if (tree && Math.hypot(tree.x - visitor.x, tree.z - visitor.z) < 0.7) {
+      dropStickBeyond(sim, visitor);
+      visitor.until = sim.time + 2;
+      return;
+    }
+    if (tree) aimAt(visitor, sim.cells[tree.k * GRID + tree.i]);
+    return;
+  }
+  if (crowLoot(sim, visitor)) {
+    visitor.intent = 'nest';
+    const trees = (sim.trees || []).filter(tree => !tree.fallen);
+    const tree = trees[Math.floor(hash(sim.time * 2) * Math.max(1, trees.length))];
+    if (tree) aimAt(visitor, sim.cells[tree.k * GRID + tree.i]);
+    else visitor.until = sim.time + 3;
+    return;
+  }
+  visitor.until = sim.time;
+}
+
+function actFox(sim, visitor) {
+  const squirrels = sim.squirrels || [];
+  let prey = null;
+  let best = 1.4;
+  for (const squirrel of squirrels) {
+    const d = Math.hypot(squirrel.x - visitor.x, squirrel.z - visitor.z);
+    if (d < best) {
+      best = d;
+      prey = squirrel;
+    }
+  }
+  if (prey && best < 0.55) {
+    sim.squirrels = squirrels.filter(item => item !== prey);
+    speak(sim, 'The fox keeps the hollow.');
+    visitor.until = sim.time + 2;
+    return;
+  }
+  if (prey) aimAt(visitor, cellAt(sim.cells, prey.x, prey.z) || sim.hearth);
+  else {
+    const hollow = hollowsOf(sim)[0];
+    if (hollow) aimAt(visitor, sim.cells[hollow.k * GRID + hollow.i]);
+    else visitor.until = sim.time;
+  }
+}
+
+function actHeron(sim, visitor) {
+  const cell = cellAt(sim.cells, visitor.x, visitor.z);
+  const depth = cell ? depthAt(sim, cell.x, cell.z) : 0;
+  if (depth < 0.03) {
+    visitor.until = sim.time;
+    return;
+  }
+  visitor.pause = (visitor.pause || 0) + 0.1;
+  if (visitor.pause > 6 && sim.chronicle) sim.chronicle.heron = true;
+}
+
 function considerSpawns(sim) {
   const season = seasonOf(sim).id;
   const era = eraOf(sim);
@@ -257,6 +425,42 @@ function considerSpawns(sim) {
       if (wanderer) {
         aimAt(wanderer, sim.hearth);
         speak(sim, 'A stranger comes.');
+      }
+    }
+  }
+  if ((era === 'keep' || era === 'undercroft') && roll > 0.68) {
+    const wall = wallWithWetNeighbor(sim);
+    if (wall) {
+      const mole = spawn(sim, 'mole', 'dig');
+      if (mole) {
+        aimAt(mole, wall);
+        mole.until = sim.time + 6;
+      }
+    }
+  }
+  if ((season === 'AUT' || season === 'WIN') && roll > 0.52 && roll < 0.82) {
+    const crow = spawn(sim, 'crow', 'loot');
+    if (crow) {
+      const here = cellAt(sim.cells, crow.x, crow.z);
+      aimAt(crow, here);
+    }
+  }
+  const night = ((sim.time || 0) % 64) / 64;
+  if (night > 0.72 && night < 0.9 && roll > 0.74) {
+    const fox = spawn(sim, 'fox', 'hunt');
+    if (fox) {
+      const hollow = hollowsOf(sim)[0];
+      aimAt(fox, hollow ? sim.cells[hollow.k * GRID + hollow.i] : sim.hearth);
+    }
+  }
+  if (season === 'SUM' && roll > 0.58 && roll < 0.72) {
+    const pond = pickPond(sim);
+    if (pond) {
+      const heron = spawn(sim, 'heron', 'stand');
+      if (heron) {
+        aimAt(heron, pond);
+        heron.until = sim.time + 40;
+        speak(sim, 'A heron comes.');
       }
     }
   }
@@ -293,6 +497,11 @@ export function updateVisitors(sim, dt) {
     if (visitor.kind === 'deer') actDeer(sim, visitor);
     else if (visitor.kind === 'boar') actBoar(sim, visitor);
     else if (visitor.kind === 'wanderer') actWanderer(sim, visitor);
+    else if (visitor.kind === 'mole') actMole(sim, visitor);
+    else if (visitor.kind === 'crow') actCrow(sim, visitor);
+    else if (visitor.kind === 'fox') actFox(sim, visitor);
+    else if (visitor.kind === 'heron') actHeron(sim, visitor);
+    if (visitor.kind === 'crow' && !visitor.carry && hash(sim.time * 0.3 + visitor.x) < 0.04) dropStickBeyond(sim, visitor);
   }
   sim.visitors = sim.visitors.filter(visitor => visitor.until > sim.time);
 }
@@ -340,6 +549,17 @@ export function drawVisitors(draw, sim) {
         stroke(INK.charcoal, 0.07)
       );
       draw.point([visitor.x + 0.02, y + 0.78, visitor.z], stroke(INK.brass, 0.04));
+    } else if (visitor.kind === 'crow') {
+      draw.streak([visitor.x - fx * 0.1, y + 0.12, visitor.z - fz * 0.1], [visitor.x + fx * 0.12, y + 0.14, visitor.z + fz * 0.12], stroke(INK.charcoal, 0.05));
+      draw.streak([visitor.x + fx * 0.08, y + 0.15, visitor.z + fz * 0.08], [visitor.x + fx * 0.2, y + 0.11, visitor.z + fz * 0.16], stroke(INK.charcoal, 0.03));
+    } else if (visitor.kind === 'fox') {
+      draw.streak([visitor.x - fx * 0.1, y + 0.04, visitor.z - fz * 0.1], [visitor.x + fx * 0.12, y + 0.07, visitor.z + fz * 0.12], stroke(10, 0.06));
+      draw.point([visitor.x + fx * 0.14, y + 0.1, visitor.z + fz * 0.14], stroke(14, 0.025));
+    } else if (visitor.kind === 'heron') {
+      draw.streak([visitor.x, y, visitor.z], [visitor.x + 0.02, y + 0.55, visitor.z], stroke(6, 0.035));
+      draw.streak([visitor.x + 0.02, y + 0.52, visitor.z], [visitor.x + fx * 0.18, y + 0.45, visitor.z + fz * 0.18], stroke(INK.charcoal, 0.03));
+    } else if (visitor.kind === 'mole') {
+      draw.point([visitor.x, y + 0.02, visitor.z], stroke(INK.humus, 0.05));
     }
   }
 }

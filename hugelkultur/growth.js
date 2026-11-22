@@ -1,7 +1,7 @@
 import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain, crownFade } from './world.js?v=hold';
 import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=hold';
 import { seasonOf, seasonLength, idolDepth } from './water.js?v=hold';
-import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf, eraOf, landCap, ERA_LINE } from './clearing.js?v=hold';
+import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf, eraOf, landCap, ERA_LINE, woodOf } from './clearing.js?v=hold';
 
 const MOSS = { width: 0.045, color: INK.lush, density: 2, emissive: false, depth: true };
 const DEEP = { width: 0.04, color: INK.deep, density: 2, emissive: false, depth: true };
@@ -73,10 +73,18 @@ function remember(cell, cause) {
 
 function offerFruit(sim, cell) {
   const marks = cell.marks || {};
-  if (!marks.tend || !marks.leaf || !marks.snow || !marks.rain || cell.fruit) return;
-  cell.fruit = CROPS[Math.floor(hash(cell.i * 9 + cell.k * 4 + (sim.year || 1)) * CROPS.length) % CROPS.length];
-  cell.fruitGrowth = 0.08;
-  speak(sim, 'berm', 'The mound keeps a seed. It is good.');
+  if (!marks.tend || !marks.leaf || !marks.snow || !marks.rain) return;
+  if (!cell.fruit) {
+    cell.fruit = CROPS[Math.floor(hash(cell.i * 9 + cell.k * 4 + (sim.year || 1)) * CROPS.length) % CROPS.length];
+    cell.fruitGrowth = 0.08;
+  }
+  if (!cell.seedBanked) {
+    cell.seedBanked = true;
+    const kind = cell.lastWood || cell.woods?.[0] || 'oak';
+    sim.seeds = sim.seeds || {};
+    sim.seeds[kind] = (sim.seeds[kind] || 0) + 1;
+    speak(sim, 'berm', 'The mound keeps a seed. It is good.');
+  }
 }
 
 export function beginMound(sim, cell, cause, line) {
@@ -137,6 +145,110 @@ function depthAt(sim, cell) {
   return hit?.depth || 0;
 }
 
+const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+function crownsOver(sim, cell) {
+  let n = 0;
+  for (const tree of sim.trees || []) {
+    if (tree.fallen || tree.group === 'plant') continue;
+    if ((tree.growth || 0) <= 2) continue;
+    if (Math.hypot(tree.x - cell.x, tree.z - cell.z) < 1.1) n += 1;
+  }
+  return n;
+}
+
+function markRoofedCourt(sim) {
+  for (const cell of sim.cells || []) {
+    if (cell.hearth) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist > COURT) {
+      if (cell.roofed) cell.roofed = false;
+      continue;
+    }
+    const roofed = crownsOver(sim, cell) >= 2;
+    if (roofed !== !!cell.roofed) {
+      cell.roofed = roofed;
+      if (roofed && !sim.quiet) speak(sim, 'note', 'The court goes under the crowns.');
+    }
+  }
+}
+
+function tendWallTrees(sim, dt) {
+  for (const tree of sim.trees || []) {
+    if (!tree.planted || tree.fallen || tree.group === 'plant') continue;
+    const cell = sim.cells[tree.k * GRID + tree.i];
+    if (!cell || (cell.cubes || 0) < 2) continue;
+    if ((tree.growth || 0) <= 2) continue;
+    if (tree.prunedUntil > sim.time) continue;
+    if ((tree._splitWait || 0) > sim.time) continue;
+    tree._splitWait = sim.time + seasonLength(sim) * 0.9;
+    if (Array.isArray(cell.block) && cell.block.length) cell.block.pop();
+    cell.cubes = Math.max(0, (cell.cubes || 0) - 1);
+    if (!cell.crack) {
+      cell.crack = true;
+      cell.burrow = Math.max(cell.burrow || 0, 0.4);
+      sim.bedDirty = true;
+      if (sim.chronicle) sim.chronicle.breach = true;
+      speak(sim, 'note', 'The roots split the wall.');
+    }
+  }
+}
+
+function tendBees(sim) {
+  if (seasonOf(sim).id !== 'SUM' || eraOf(sim) === 'glade') return;
+  if (sim._beesSet === sim.year) return;
+  let best = null;
+  let score = -1;
+  for (const cell of sim.cells) {
+    if ((cell.cubes || 0) < 2 || cell.hearth) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist < PAD) continue;
+    const sun = cell.k < HEARTH_K ? 1.2 : 0.6;
+    const value = sun + (cell.cubes || 0) * 0.2;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  if (best && !best.bees) {
+    best.bees = true;
+    sim._beesSet = sim.year;
+    speak(sim, 'note', 'The wall keeps bees.');
+  }
+}
+
+function tendEmbers(sim) {
+  const night = ((sim.time || 0) % 64) / 64;
+  const dusk = night > 0.65 && night < 0.92;
+  if (sim.spiritId === 'fire' && dusk) {
+    let n = 0;
+    for (const cell of sim.cells) {
+      if ((cell.cubes || 0) < 1 || cell.hearth || n >= 12) continue;
+      const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+      if (dist < PAD) continue;
+      cell.embers = Math.min(1, (cell.embers || 0) + 0.08);
+      n += 1;
+    }
+  } else if (night < 0.2 || night > 0.95) {
+    for (const cell of sim.cells) {
+      if (cell.embers) cell.embers = Math.max(0, cell.embers - 0.15);
+    }
+  }
+}
+
+function raidNutCache(sim) {
+  if (sim.spiritId !== 'snow' || seasonOf(sim).id !== 'WIN') return;
+  if ((sim._snowRaid || 0) > sim.time) return;
+  sim._snowRaid = sim.time + 18;
+  const nuts = sim.cells.filter(cell => cell.nutAt && cell.nutAt > 0);
+  if (!nuts.length) return;
+  const cell = nuts[Math.floor(hash(sim.time * 3) * nuts.length)];
+  cell.nutAt = 0;
+  sim.seeds = sim.seeds || {};
+  sim.seeds.oak = (sim.seeds.oak || 0) + 1;
+  speak(sim, 'note', 'The snow body finds a seed.');
+}
+
 export function moundLine(cell) {
   return storyLine(cell?.story);
 }
@@ -180,6 +292,10 @@ export function updateGrowth(sim, dt) {
         if ((cell.soak || 0) > 2.6 && cell.berm && !cell.knitted) {
           cell.knitted = true;
           cell.coat = (cell.coat || 1) + 1;
+          if (cell.burrow) {
+            cell.burrow = 0;
+            sim.bedDirty = true;
+          }
           sim.bedDirty = true;
           speak(sim, 'berm', 'The mound knits.');
         }
@@ -190,7 +306,23 @@ export function updateGrowth(sim, dt) {
       berms += 1;
       cell.stood = (cell.stood || 0) + dt;
     }
+    if ((cell.cubes || 0) >= 2 && cell.rockAge && (sim.year || 1) - cell.rockAge >= 3) {
+      const ivy = Math.min((cell.cubes || 1) + Math.floor((sim.year || 1) - cell.rockAge - 2), (cell.cubes || 1));
+      if (ivy > (cell.ivy || 0)) cell.ivy = ivy;
+    }
+    if ((cell.burrow || 0) > 0.85 && !cell.paved) {
+      cell.sill = Math.max(-0.9, (cell.sill || 0) - dt * 0.02);
+      sim.bedDirty = true;
+    }
+    if (cell.roofed && (cell.moisture || 0) > 0.5 && (cell.bees || hash(cell.i * 7 + cell.k) < 0.02)) {
+      cell.fungus = Math.min(1, (cell.fungus || 0) + dt * 0.04);
+    }
   }
+  tendWallTrees(sim, dt);
+  markRoofedCourt(sim);
+  tendBees(sim);
+  tendEmbers(sim);
+  raidNutCache(sim);
   ageRelic(sim);
   updateSquirrels(sim, dt);
   sim.berms = berms;
@@ -232,6 +364,8 @@ export function drawGrowth(draw, sim) {
   drawIdol(draw, sim);
   drawRises(draw, sim);
   for (const cell of sim.cells) {
+    if (cell.fungus > 0.15) drawRoofFungi(draw, cell);
+    if (cell.embers > 0.1) drawWallEmber(draw, cell, sim);
     if (cell.berm || cell.cubes || cell.fruit || (cell.story || []).length) drawCrown(draw, cell);
     if ((cell.sill || 0) < -0.2) drawCut(draw, cell);
     if (cell.nutAt) drawNut(draw, cell);
@@ -239,6 +373,15 @@ export function drawGrowth(draw, sim) {
     if (cell.parched) drawParched(draw, cell);
     if ((cell.soak || 0) > 0.8) drawKnit(draw, sim, cell);
     if (!cell.berm && (cell.moisture > 0.55 || cell.compost > 0.4) && !cell.hearth && !cell.plot && cell.layers === 0) drawLush(draw, cell);
+    if (cell.stair && (cell.layers || 0) > 0 && !(cell.cubes || 0)) {
+      const y = walkHeight(cell) + 0.02;
+      const kind = cell.woods?.[0] || cell.lastWood || 'maple';
+      draw.streak(
+        [cell.x - 0.12, y, cell.z - 0.08],
+        [cell.x + 0.12, y + 0.03, cell.z + 0.08],
+        { width: 0.045, color: woodOf(kind).color, density: 2.4, emissive: false, depth: true }
+      );
+    }
   }
   drawRelic(draw, sim);
   drawSparkles(draw, sim);
@@ -287,6 +430,7 @@ function stackHeight(cell) {
 
 function settleOne(sim, cell) {
   if (!cell?.berm || cell.hearth) return false;
+  const wasRock = !!cell.rock;
   const gain = brickGain(stackHeight(cell), moundRise(cell));
   if (gain > 0) {
     const blocks = blockHeights(cell).slice();
@@ -304,6 +448,11 @@ function settleOne(sim, cell) {
   cell.woods = [];
   cell.settle = 0;
   cell.stood = 0;
+  if (wasRock && !sim.quiet) {
+    sim.carrying = true;
+    sim.carryKind = 'stone';
+    speak(sim, 'stone', 'A flag comes from the stone.');
+  }
   return true;
 }
 
@@ -381,8 +530,9 @@ function drawRises(draw, sim) {
     if (left <= 0) return;
     const cut = cutScale(sim, cell, h);
     const drawH = h * cut;
+    const stairHalf = !!cell.stair;
     if (drawH <= BRICK * 1.15 || h > BRICK * 3) {
-      const scale = Math.min(1.8, Math.max(0.45, drawH / BRICK));
+      const scale = stairHalf ? 0.5 : Math.min(1.8, Math.max(0.45, drawH / BRICK));
       if (!putBrick(draw, cubes, cell, cell.elevation + drawH / 2, scale)) return;
       left -= 1;
       if (cut < 1) {
@@ -393,9 +543,31 @@ function drawRises(draw, sim) {
       }
       continue;
     }
-    const n = Math.min(6, Math.ceil(drawH / BRICK));
-    for (let i = 0; i < n - 1 && left > 0; i++) {
-      if (!putBrick(draw, cubes, cell, cell.elevation + BRICK / 2 + i * BRICK)) return;
+    const bricks = Math.min(6, Math.ceil(drawH / BRICK));
+    const causes = cell.story || [];
+    const yaw = sim.viewYaw || 0;
+    const fx = Math.cos(yaw);
+    const fz = Math.sin(yaw);
+    for (let i = 0; i < bricks - 1 && left > 0; i++) {
+      const sy = cell.stair && i === 0 && bricks > 1 ? 0.5 : 1;
+      if (!putBrick(draw, cubes, cell, cell.elevation + BRICK / 2 + i * BRICK, sy)) return;
+      const cause = causes[i % causes.length] || causes[0];
+      if (cause) {
+        const band = BAND[cause] ?? INK.lush;
+        const seamY = cell.elevation + BRICK * (i + 1);
+        if (i % 2 === 0) {
+          draw.streak(
+            [cell.x - fx * 0.22, seamY, cell.z - fz * 0.22],
+            [cell.x + fx * 0.22, seamY + 0.01, cell.z + fz * 0.22],
+            { width: 0.012, color: band, density: 2, emissive: false, depth: true }
+          );
+        }
+        draw.streak(
+          [cell.x - fz * 0.2, seamY, cell.z + fx * 0.2],
+          [cell.x + fz * 0.2, seamY, cell.z - fx * 0.2],
+          { width: 0.008, color: INK.charcoal, density: 2.1, emissive: false, depth: true }
+        );
+      }
       left -= 1;
     }
     if (left <= 0) return;
@@ -422,6 +594,18 @@ function drawNut(draw, cell) {
 function drawMouth(draw, cell) {
   const y = cell.elevation + 0.04;
   draw.streak([cell.x - 0.22, y, cell.z - 0.02], [cell.x + 0.22, y + 0.02, cell.z + 0.04], { ...WET, width: 0.07 });
+}
+
+function drawRoofFungi(draw, cell) {
+  const y = groundY(cell) + 0.12;
+  draw.streak([cell.x - 0.02, y, cell.z], [cell.x + 0.14, y + 0.06, cell.z + 0.03], FUNGI);
+  draw.streak([cell.x + 0.04, y - 0.02, cell.z - 0.08], [cell.x + 0.16, y + 0.02, cell.z + 0.02], FUNGI);
+}
+
+function drawWallEmber(draw, cell, sim) {
+  const pulse = 0.5 + 0.5 * Math.sin((sim.time || 0) * 4.2);
+  const y = groundY(cell) + (cell.cubes || 1) * 0.74 + 0.02;
+  draw.point([cell.x, y, cell.z], { width: 0.03 + pulse * 0.02, color: INK.ember, density: 1.2, emissive: true, depth: true });
 }
 
 function drawParched(draw, cell) {
@@ -573,7 +757,7 @@ function ageRelic(sim) {
 }
 
 function openGround(sim, cell) {
-  if (!cell || cell.hearth || cell.tree || cell.plot || cell.berm || cell.log || cell.nutAt || cell.channel) return false;
+  if (!cell || cell.hearth || cell.tree || cell.plot || cell.berm || cell.log || cell.nutAt || cell.channel || cell.paved) return false;
   if ((cell.worn || 0) > 0.6) return false;
   if (Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) < PAD) return false;
   const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
@@ -612,6 +796,7 @@ function sproutNut(sim, cell) {
 
 function nutGround(sim, cell, finger) {
   if (openGround(sim, cell)) return true;
+  if ((cell.cubes || 0) >= 2 && !cell.tree && !cell.hearth && !cell.plot) return true;
   if (!finger || !cell || cell.hearth || cell.tree || cell.plot || cell.berm || cell.log || cell.nutAt) return false;
   const nearMouth = Math.hypot(cell.i - finger.mouth[0], cell.k - finger.mouth[1]) < 2.5;
   const nearGate = Math.hypot(cell.i - finger.gate[0], cell.k - finger.gate[1]) < 2.3;
@@ -684,6 +869,14 @@ export function seedSquirrels(sim) {
   sim.squirrels = made;
 }
 
+function foxNear(sim, cell) {
+  for (const visitor of sim.visitors || []) {
+    if (visitor.kind !== 'fox') continue;
+    if (Math.hypot(visitor.x - cell.x, visitor.z - cell.z) < 1.6) return true;
+  }
+  return false;
+}
+
 function updateSquirrels(sim, dt) {
   if (!sim.squirrels) seedSquirrels(sim);
   if ((sim.year || 1) >= 6 && sim.squirrels.length < 3) {
@@ -695,6 +888,12 @@ function updateSquirrels(sim, dt) {
   for (const squirrel of sim.squirrels) {
     if (squirrel.pause > 0) {
       squirrel.pause -= dt;
+      continue;
+    }
+    const hereCell = cellAt(sim.cells, squirrel.x, squirrel.z);
+    if (hereCell && foxNear(sim, hereCell)) {
+      squirrel.tx = squirrel.x + (hash(sim.time + squirrel.z) - 0.5) * 2;
+      squirrel.tz = squirrel.z + (hash(sim.time + squirrel.x) - 0.5) * 2;
       continue;
     }
     const dx = squirrel.tx - squirrel.x;

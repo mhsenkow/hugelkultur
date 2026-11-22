@@ -57,43 +57,63 @@
           <circle cx="11.5" cy="11.5" r="1.35" fill="currentColor"/>
         </svg>
       </button>
+      <button id="log-toggle" type="button" title="Log" aria-expanded="false" aria-controls="log-panel">
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3.2 2.6h9.6v10.8H3.2z" fill="none" stroke="currentColor" stroke-width="1.35"/>
+          <path d="M5.2 5.2h5.6M5.2 7.6h5.6M5.2 10h3.4" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/>
+        </svg>
+      </button>
       <button id="restart" type="button" title="Restart">⟲</button>
     </div>
   </header>
+
+  <aside id="log-panel" class="look log" hidden>
+    <p class="eyebrow">Work</p>
+    <h2>Log</h2>
+    <p class="look-note">Mark how each feature feels and looks. Hover a name for what it really is. Five dots. Empty means not watched yet.</p>
+    <p id="log-summary" class="log-summary">Nothing scored yet.</p>
+    <div class="look-patterns log-filters" role="group" aria-label="List">
+      <button type="button" data-log="all" aria-pressed="true">All</button>
+      <button type="button" data-log="fifty" aria-pressed="false">Fifty</button>
+      <button type="button" data-log="keep" aria-pressed="false">Keep</button>
+      <button type="button" data-log="soft" aria-pressed="false">Soft</button>
+    </div>
+    <div id="log-list" class="log-list"></div>
+  </aside>
 
   <aside id="look-panel" class="look" hidden>
     <p class="eyebrow">Look</p>
     <h2>Dots</h2>
     <p class="look-note">Move these while you watch. What you leave is what stays.</p>
     <label>
-      <span>Pixels</span>
+      <span class="tip" tabindex="0" data-tip="How coarse the picture is. Higher makes each pixel larger." aria-label="Pixels. How coarse the picture is. Higher makes each pixel larger.">Pixels</span>
       <output id="look-pixels-out">3</output>
       <input id="look-pixels" type="range" min="1" max="12" step="1" value="3">
     </label>
     <label>
-      <span>Dots</span>
+      <span class="tip" tabindex="0" data-tip="How much of the picture is drawn as dots instead of flat color." aria-label="Dots. How much of the picture is drawn as dots instead of flat color.">Dots</span>
       <output id="look-dots-out">62</output>
       <input id="look-dots" type="range" min="0" max="100" step="1" value="62">
     </label>
     <label>
-      <span>Ink</span>
+      <span class="tip" tabindex="0" data-tip="How heavy the dark ink sits on the light." aria-label="Ink. How heavy the dark ink sits on the light.">Ink</span>
       <output id="look-ink-out">5</output>
       <input id="look-ink" type="range" min="0" max="40" step="1" value="5">
     </label>
     <label>
-      <span>Grain</span>
+      <span class="tip" tabindex="0" data-tip="How much paper grain softens the edges." aria-label="Grain. How much paper grain softens the edges.">Grain</span>
       <output id="look-grain-out">45</output>
       <input id="look-grain" type="range" min="0" max="100" step="1" value="45">
     </label>
     <label>
-      <span>Fidelity</span>
+      <span class="tip" tabindex="0" data-tip="How many spheres bake the forest. Letting go rebuilds it." aria-label="Fidelity. How many spheres bake the forest. Letting go rebuilds it.">Fidelity</span>
       <output id="look-fidelity-out">1×</output>
       <input id="look-fidelity" type="range" min="1" max="4" step="1" value="1">
     </label>
     <p class="look-note">Letting go rebuilds this forest. Trees and the ground use more spheres.</p>
     <div class="look-patterns" role="group" aria-label="Dot pattern">
-      <button type="button" data-pattern="bayer" aria-pressed="true">Grid</button>
-      <button type="button" data-pattern="blue-noise" aria-pressed="false">Scatter</button>
+      <button type="button" data-pattern="bayer" aria-pressed="true" title="Dots fall on a regular grid.">Grid</button>
+      <button type="button" data-pattern="blue-noise" aria-pressed="false" title="Dots scatter more evenly, less like a screen.">Scatter</button>
     </div>
     <button id="look-reset" type="button">Original</button>
   </aside>
@@ -130,6 +150,34 @@
         <path d="M8 14V7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
         <path d="M8 8c0-3 2.2-4.5 4.5-4.5C12.2 6 10 7.2 8 8z" fill="currentColor"/>
         <path d="M8 9.2C8 6.4 5.6 5 3.4 5 3.8 8 6 9 8 9.2z" fill="currentColor"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="keep-dock">
+    <aside id="keep" class="flora keep-panel" hidden>
+      <div class="flora-stage keep-stage">
+        <canvas id="keep-map" aria-label="Plan of the keep"></canvas>
+        <div class="flora-caption keep-caption">
+          <p class="eyebrow">Keep</p>
+          <h2 id="keep-era">Glade</h2>
+          <p id="keep-rooms" class="study-line"></p>
+          <p id="keep-store" class="study-line"></p>
+          <p id="keep-visitors" class="study-line"></p>
+          <ul id="keep-niches" class="keep-niches"></ul>
+        </div>
+      </div>
+      <div class="flora-rail">
+        <p class="eyebrow">Plan</p>
+        <h2>The keep</h2>
+        <p class="look-note">Height, rooms, water roads, and what the walls keep.</p>
+      </div>
+    </aside>
+    <button id="keep-toggle" class="flora-mark keep-mark" type="button" aria-expanded="false" aria-controls="keep" title="Keep">
+      <span class="flora-dot"></span>
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M5 11V8h2v3M9 11V6h2v5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
       </svg>
     </button>
   </div>
@@ -173,14 +221,17 @@
 
   <div id="end" class="end" hidden>
     <div class="card">
-      <p class="eyebrow">The idol went under</p>
-      <h1>Water climbed the pedestal</h1>
+      <p class="eyebrow" id="end-eyebrow">The idol went under</p>
+      <h1 id="end-title">Water climbed the pedestal</h1>
       <p class="lede" id="end-line">The land stays. Keep the idol dry.</p>
       <ol id="end-lines"></ol>
       <dl>
         <div><dt>Years</dt><dd id="end-years">1</dd></div>
         <div><dt>Cubes</dt><dd id="end-cubes">0</dd></div>
         <div><dt>Gates</dt><dd id="end-gates">0</dd></div>
+        <div><dt>Rooms</dt><dd id="end-rooms">0</dd></div>
+        <div><dt>Rivers</dt><dd id="end-rivers">0</dd></div>
+        <div><dt>Visitors</dt><dd id="end-visitors">0</dd></div>
       </dl>
       <ul id="end-read" class="end-read"></ul>
       <div class="card-actions">

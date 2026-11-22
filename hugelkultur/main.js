@@ -1,5 +1,5 @@
 import { createRenderer } from '../webgl.mjs';
-import { buildWorld, setScene, useGrid, GRID, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=hold';
+import { buildWorld, setScene, useGrid, GRID, HEARTH_I, HEARTH_K, PEDESTAL, cellAt, revealGlade, walkHeight } from './world.js?v=hold';
 import { createAvatar, movement, wearSpirit } from './avatar.js?v=hold';
 import { SPIRITS, spiritById, buildSpirit } from './avatars.js?v=hold';
 import { createStickSystem, updateSticks, plantAt } from './sticks.js?v=hold';
@@ -13,13 +13,16 @@ import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth
 import { steer } from './guide.js?v=hold';
 import { updateVisitors, shoo } from './visitors.js?v=hold';
 import {
-  wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS,
+  wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS, GOD_TIPS,
   loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
-  EDGE_NAME, compassName, liftCap, buried, groundLine, eraOf
+  EDGE_NAME, compassName, liftCap, buried, groundLine, eraOf, roomsOf, wallHeight
 } from './clearing.js?v=hold';
 import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=hold';
 import { FLORA, floraById } from './species.js?v=hold';
 import { buildSpecimen, buildMotion, studiesFor, cubeTake } from './specimens.js?v=hold';
+import {
+  FEATURES, loadScores, saveScores, scoreOf, setScore, scoreSummary
+} from './features.js?v=hold';
 
 const canvas = document.querySelector('#view');
 const seasonLabel = document.querySelector('#season-label');
@@ -234,6 +237,7 @@ function artSize() {
 }
 
 let floodDrone = null;
+let riverDrone = null;
 let dronePitch = 0;
 let toneBurst = 0;
 
@@ -314,6 +318,62 @@ function stopDrone() {
   }
   floodDrone = null;
   dronePitch = 0;
+}
+
+function stopRiverVoice() {
+  if (!riverDrone) return;
+  try {
+    riverDrone.source.stop();
+  } catch {
+    /* already stopped */
+  }
+  riverDrone = null;
+}
+
+function riverVoice(sim) {
+  if (!audioEnabled || !sim?.cells) {
+    stopRiverVoice();
+    return;
+  }
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  let depth = 0;
+  let iced = false;
+  for (const cell of sim.cells) {
+    if (!cell.outlet) continue;
+    if (cell.ice) {
+      iced = true;
+      break;
+    }
+    depth += sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+  }
+  const target = iced ? 0 : Math.min(0.015, depth * 0.012);
+  const now = ctx.currentTime;
+  if (!riverDrone && target > 0.0005) {
+    const size = Math.floor(ctx.sampleRate * 2);
+    const buffer = ctx.createBuffer(1, size, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = (Math.random() * 2 - 1) * 0.35;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 190;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
+    riverDrone = { source, gain };
+    gain.gain.setTargetAtTime(target, now, 0.12);
+    return;
+  }
+  if (riverDrone) {
+    riverDrone.gain.gain.setTargetAtTime(target, now, 0.15);
+    if (target < 0.0001) stopRiverVoice();
+  }
 }
 
 function keepDrone(stage) {
@@ -422,6 +482,7 @@ function paintHud() {
   paintSpirits(false);
   const stage = sim.over ? 'under' : idolStage(idolDepth(sim));
   keepDrone(sim.over ? 'under' : stage);
+  riverVoice(sim);
   const damp = stage === 'dry' && clearingDepth(sim) > 0.045;
   hearthLabel.textContent = idolLabel(stage);
   hearthLabel.title = damp ? 'Water is in the ring.' : '';
@@ -433,9 +494,17 @@ function paintHud() {
     carryLabel.setAttribute('aria-label', `a ${label} stick`);
   } else carryLabel.title = '';
   paintMeasures();
+  paintKeep(false);
   if (!sim.over) return;
+  const breach = sim.endCause === 'breach';
+  const eyebrow = document.querySelector('#end-eyebrow');
+  const title = document.querySelector('#end-title');
+  if (eyebrow) eyebrow.textContent = breach ? 'The wall gave way' : 'The idol went under';
+  if (title) title.textContent = breach ? 'Water found a hole' : 'Water climbed the pedestal';
   const endLine = document.querySelector('#end-line');
-  if (endLine) endLine.textContent = 'The land stays. Keep the idol dry.';
+  if (endLine) endLine.textContent = breach
+    ? 'The keep held high. The wall did not.'
+    : 'The land stays. Keep the idol dry.';
   const lines = sim.years?.length ? sim.years : (sim.yearLine ? [sim.yearLine] : []);
   document.querySelector('#end-years').textContent = String(sim.year);
   const cubes = sim.cells.reduce((sum, cell) => sum + (cell.cubes || 0), 0);
@@ -444,6 +513,17 @@ function paintHud() {
   if (cubeNode) cubeNode.textContent = String(cubes);
   const gates = Number.isFinite(sim.gates) ? sim.gates : lines.filter(line => line.includes('gate')).length;
   if (gateNode) gateNode.textContent = String(gates);
+  const rooms = roomsOf(sim.cells, HEARTH_I, HEARTH_K).length;
+  const rivers = Number.isFinite(sim.outletsEver)
+    ? sim.outletsEver
+    : sim.cells.filter(cell => cell.outlet).length;
+  const visitors = Object.values(sim.visited || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
+  const roomNode = document.querySelector('#end-rooms');
+  const riverNode = document.querySelector('#end-rivers');
+  const visitNode = document.querySelector('#end-visitors');
+  if (roomNode) roomNode.textContent = String(rooms);
+  if (riverNode) riverNode.textContent = String(rivers);
+  if (visitNode) visitNode.textContent = String(visitors);
   const list = document.querySelector('#end-lines');
   if (list && list.childElementCount !== Math.min(8, lines.length)) {
     list.replaceChildren(...lines.slice(-8).map(text => {
@@ -464,6 +544,107 @@ function paintHud() {
     }
   }
   end.hidden = false;
+}
+
+function keepBand(cell) {
+  const h = wallHeight(cell) + (cell.land || 0) * 0.4;
+  if (h >= 2.2) return '#3a342c';
+  if (h >= 1.4) return '#5c5346';
+  if (h >= 0.7) return '#7a6e5c';
+  if ((cell.sill || 0) <= -0.3 || cell.race || cell.river || cell.outlet) return '#6a9bb0';
+  if (cell.worn > 0.6 || cell.paved) return '#cbb99a';
+  return '#d9d0bf';
+}
+
+function paintKeep(force) {
+  const panel = document.querySelector('#keep');
+  if (!panel || panel.hidden || !sim) return;
+  const map = document.querySelector('#keep-map');
+  if (!map) return;
+  const size = Math.max(160, Math.min(map.clientWidth || 320, map.clientHeight || 320));
+  const px = Math.max(2, Math.floor(size / GRID));
+  const dim = px * GRID;
+  if (map.width !== dim || map.height !== dim) {
+    map.width = dim;
+    map.height = dim;
+  }
+  const ctx = map.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, dim, dim);
+  for (const cell of sim.cells) {
+    ctx.fillStyle = keepBand(cell);
+    ctx.fillRect(cell.i * px, cell.k * px, px, px);
+    if (cell.outlet || cell.race) {
+      ctx.fillStyle = 'rgba(70, 130, 160, 0.7)';
+      ctx.fillRect(cell.i * px, cell.k * px, px, px);
+    }
+    if (cell.store) {
+      ctx.fillStyle = '#8a5a28';
+      ctx.fillRect(cell.i * px + px * 0.2, cell.k * px + px * 0.2, px * 0.6, px * 0.6);
+    }
+    if (cell.hearth) {
+      ctx.fillStyle = '#c45c3e';
+      ctx.fillRect(cell.i * px + px * 0.15, cell.k * px + px * 0.15, px * 0.7, px * 0.7);
+    }
+  }
+  const rooms = roomsOf(sim.cells, HEARTH_I, HEARTH_K);
+  ctx.strokeStyle = 'rgba(37, 38, 41, 0.45)';
+  ctx.lineWidth = Math.max(1, px * 0.12);
+  ctx.font = `${Math.max(8, Math.floor(px * 0.7))}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.fillStyle = 'rgba(37, 38, 41, 0.72)';
+  for (const room of rooms) {
+    let minI = GRID;
+    let minK = GRID;
+    let maxI = 0;
+    let maxK = 0;
+    for (const cell of room.cells) {
+      minI = Math.min(minI, cell.i);
+      minK = Math.min(minK, cell.k);
+      maxI = Math.max(maxI, cell.i);
+      maxK = Math.max(maxK, cell.k);
+    }
+    ctx.strokeRect(minI * px + 0.5, minK * px + 0.5, (maxI - minI + 1) * px - 1, (maxK - minK + 1) * px - 1);
+    if (px >= 8) {
+      ctx.fillText(room.name, minI * px + 2, minK * px + Math.max(9, px));
+    }
+  }
+  const era = eraOf(sim);
+  const eraNode = document.querySelector('#keep-era');
+  if (eraNode) eraNode.textContent = era.charAt(0).toUpperCase() + era.slice(1);
+  const roomLine = document.querySelector('#keep-rooms');
+  if (roomLine) {
+    roomLine.textContent = rooms.length
+      ? rooms.map(room => room.name).join(' · ')
+      : 'No rooms yet.';
+  }
+  const storeLine = document.querySelector('#keep-store');
+  if (storeLine) {
+    const n = sim.store?.sticks?.length || 0;
+    const seeds = Object.values(sim.seeds || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+    storeLine.textContent = n || seeds
+      ? `Store ${n} stick${n === 1 ? '' : 's'} · ${seeds} seed${seeds === 1 ? '' : 's'}`
+      : 'The store is empty.';
+  }
+  const visitLine = document.querySelector('#keep-visitors');
+  if (visitLine) {
+    const kinds = Object.entries(sim.visited || {}).filter(([, n]) => n > 0);
+    const live = (sim.visitors || []).map(item => item.kind);
+    visitLine.textContent = live.length
+      ? `Now: ${live.join(', ')}`
+      : kinds.length
+        ? kinds.map(([kind, n]) => `${kind} ${n}`).join(' · ')
+        : 'No visitors this year.';
+  }
+  const nicheList = document.querySelector('#keep-niches');
+  if (nicheList && (force || nicheList.dataset.count !== String((sim.niches || []).length))) {
+    const rows = (sim.niches || []).slice(-8).reverse();
+    nicheList.dataset.count = String((sim.niches || []).length);
+    nicheList.replaceChildren(...rows.map(niche => {
+      const item = document.createElement('li');
+      item.textContent = `Y${niche.year} · ${niche.title || niche.kind || 'kept'}`;
+      return item;
+    }));
+  }
 }
 
 function changedRows() {
@@ -559,6 +740,11 @@ function pick(clientX, clientY) {
     const cell = cellAt(sim.cells, stick.x, stick.z);
     const y = (cell ? walkHeight(cell) : 0.4) + 0.1;
     consider('stick', String(index), [stick.x, y, stick.z], 0.32);
+  });
+  (sim.niches || []).forEach((niche, index) => {
+    const cell = sim.cells[niche.k * GRID + niche.i];
+    if (!cell) return;
+    consider('niche', String(index), [cell.x, walkHeight(cell) + 0.14, cell.z], 0.34);
   });
   return best;
 }
@@ -695,6 +881,9 @@ function focusSubject(hit, frame) {
       say('You watch the bed.');
       sim.guide.goal = { kind: 'eat', id: plot.id, x: plot.x, z: plot.z };
     } else say('The bed is not ready.');
+  } else if (hit.kind === 'niche') {
+    const niche = (sim.niches || [])[Number(hit.id)];
+    say(niche?.title || 'A year is in the wall.');
   } else if (hit.kind === 'idol') say('You watch the idol.');
   else if (hit.kind === 'her') say('You watch her.');
   placeGaze(hit);
@@ -841,7 +1030,7 @@ function frame(now) {
       sim.watched = false;
       sim.gazeCell = null;
     }
-    const rate = Math.min(100, Math.max(1, sim.speed || 1));
+    const rate = Math.min(1000, Math.max(1, sim.speed || 1));
     sim.fast = rate >= 8;
     const driving = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyW', 'KeyA', 'KeyS', 'KeyD'].some(code => keys.has(code));
     if (driving && !sim.walking) {
@@ -854,7 +1043,8 @@ function frame(now) {
     if (!sim.over) {
       let budget = step * rate;
       let hops = 0;
-      while (budget > 0.0001 && hops < 16 && !sim.over) {
+      const hopCap = Math.min(128, Math.max(16, Math.ceil(budget / 0.4) + 2));
+      while (budget > 0.0001 && hops < hopCap && !sim.over) {
         const bit = Math.min(0.4, budget);
         updateDay(sim, bit, driving);
         const auto = steer(sim, bit, driving);
@@ -1076,7 +1266,9 @@ function showSpecimen(id, take) {
   const flora = floraById(id);
   if (sow) {
     sow.hidden = !flora || flora.group === 'weather';
-    sow.textContent = flora && sim?.sow?.id === id ? 'Click the ground' : 'Plant this';
+    const bank = flora?.group === 'crop' ? (sim?.seeds?.[id] || 0) : null;
+    if (flora?.group === 'crop' && !bank) sow.textContent = 'No seed kept.';
+    else sow.textContent = flora && sim?.sow?.id === id ? 'Click the ground' : 'Plant this';
   }
   document.querySelector(`#flora-list button[data-id="${id}"]`)?.scrollIntoView({ block: 'nearest' });
 }
@@ -1223,7 +1415,9 @@ function renderSpirit(dt) {
 function paintMeasures() {
   const panel = document.querySelector('#measures');
   if (!panel || !sim?.measures) return;
-  const libraryOpen = !document.querySelector('#flora').hidden || !document.querySelector('#spirits').hidden;
+  const libraryOpen = !document.querySelector('#flora').hidden
+    || !document.querySelector('#spirits').hidden
+    || !document.querySelector('#keep')?.hidden;
   panel.hidden = libraryOpen;
   const row = wornMeasures(sim);
   const season = seasonOf(sim);
@@ -1264,77 +1458,173 @@ function paintMeasures() {
   if (!document.querySelector('#god-panel').hidden) syncGod();
 }
 
+const SPEED_MIN = 1;
+const SPEED_MAX = 1000;
+const SPEED_LOG_MIN = Math.log(SPEED_MIN);
+const SPEED_LOG_MAX = Math.log(SPEED_MAX);
+const SPEED_SLIDER_MAX = 1000;
+
+function clampSpeed(value) {
+  return Math.min(SPEED_MAX, Math.max(SPEED_MIN, Math.round(Number(value) || SPEED_MIN)));
+}
+
+function speedFromSlider(pos) {
+  const t = Math.min(1, Math.max(0, Number(pos) / SPEED_SLIDER_MAX));
+  return clampSpeed(Math.exp(SPEED_LOG_MIN + t * (SPEED_LOG_MAX - SPEED_LOG_MIN)));
+}
+
+function sliderFromSpeed(speed) {
+  const value = clampSpeed(speed);
+  const t = (Math.log(value) - SPEED_LOG_MIN) / (SPEED_LOG_MAX - SPEED_LOG_MIN);
+  return Math.round(Math.min(1, Math.max(0, t)) * SPEED_SLIDER_MAX);
+}
+
+function applySpeed(next, { from } = {}) {
+  const value = clampSpeed(next);
+  sim.speed = value;
+  sim.fast = value >= 8;
+  try { sessionStorage.setItem('hugelkultur-speed', String(value)); } catch { /* this run still hurries */ }
+  const slider = document.querySelector('#god-panel input[data-speed="slider"]');
+  const number = document.querySelector('#god-panel input[data-speed="number"]');
+  if (slider && document.activeElement !== slider && from !== 'slider') slider.value = String(sliderFromSpeed(value));
+  if (number && document.activeElement !== number && from !== 'number') number.value = String(value);
+  paintMeasures();
+  return value;
+}
+
 function syncGod() {
   if (!sim?.measures) return;
   const row = wornMeasures(sim);
-  for (const input of document.querySelectorAll('#god-panel input[data-key]')) {
+  const speed = clampSpeed(sim.speed || 1);
+  const speedSlider = document.querySelector('#god-panel input[data-speed="slider"]');
+  const speedNumber = document.querySelector('#god-panel input[data-speed="number"]');
+  if (speedSlider && document.activeElement !== speedSlider) speedSlider.value = String(sliderFromSpeed(speed));
+  if (speedNumber && document.activeElement !== speedNumber) speedNumber.value = String(speed);
+  for (const input of document.querySelectorAll('#god-panel input[data-key][type="range"]')) {
     if (document.activeElement === input) continue;
-    if (input.dataset.key === 'climb') input.value = String(Math.round(sim.measures.climb * 100));
-    else input.value = String(Math.round((row[input.dataset.key] || 0) * 100));
-    const out = input.parentElement.querySelector('output');
-    if (!out) continue;
-    out.textContent = input.dataset.key === 'climb'
-      ? `+${sim.measures.climb.toFixed(2)}`
-      : input.value;
+    const value = input.dataset.key === 'climb'
+      ? Math.round(sim.measures.climb * 100)
+      : Math.round((row[input.dataset.key] || 0) * 100);
+    input.value = String(value);
+    const number = input.parentElement.querySelector('input[type="number"]');
+    if (number && document.activeElement !== number) {
+      number.value = input.dataset.key === 'climb' ? sim.measures.climb.toFixed(2) : String(value);
+    }
   }
   for (const button of document.querySelectorAll('#god-homes button')) {
     button.setAttribute('aria-pressed', String(button.dataset.home === row.home));
   }
 }
 
+function tipName(text, tip) {
+  const name = document.createElement('span');
+  name.className = 'tip';
+  name.tabIndex = 0;
+  name.textContent = text;
+  name.dataset.tip = tip;
+  name.setAttribute('aria-label', `${text}. ${tip}`);
+  return name;
+}
+
+function measureNumber(key, value) {
+  const number = document.createElement('input');
+  number.type = 'number';
+  number.dataset.key = key;
+  number.dataset.role = 'value';
+  if (key === 'climb') {
+    number.min = '0';
+    number.max = '0.8';
+    number.step = '0.01';
+    number.value = Number(value).toFixed(2);
+  } else {
+    number.min = '0';
+    number.max = '100';
+    number.step = '1';
+    number.value = String(Math.round(Number(value) || 0));
+  }
+  return number;
+}
+
 function buildGod() {
   const root = document.querySelector('#god-panel');
   if (!root || root.childElementCount) return;
   const speed = document.createElement('label');
-  const speedName = document.createElement('span');
-  speedName.textContent = 'Speed';
-  const speedOut = document.createElement('output');
+  speed.className = 'god-speed';
+  const speedNumber = document.createElement('input');
+  speedNumber.type = 'number';
+  speedNumber.min = String(SPEED_MIN);
+  speedNumber.max = String(SPEED_MAX);
+  speedNumber.step = '1';
+  speedNumber.dataset.speed = 'number';
+  speedNumber.setAttribute('aria-label', 'Speed multiplier');
   const speedInput = document.createElement('input');
   speedInput.type = 'range';
-  speedInput.min = '1';
-  speedInput.max = '100';
+  speedInput.min = '0';
+  speedInput.max = String(SPEED_SLIDER_MAX);
   speedInput.step = '1';
-  speedInput.dataset.speed = '1';
-  speedInput.value = String(Math.round(sim?.speed || 1));
-  speedOut.textContent = `×${speedInput.value}`;
+  speedInput.dataset.speed = 'slider';
+  speedInput.setAttribute('aria-label', 'Speed, logarithmic');
+  const startSpeed = clampSpeed(sim?.speed || 1);
+  speedNumber.value = String(startSpeed);
+  speedInput.value = String(sliderFromSpeed(startSpeed));
   speedInput.addEventListener('input', () => {
-    const next = Math.min(100, Math.max(1, Math.round(Number(speedInput.value) || 1)));
-    sim.speed = next;
-    sim.fast = next >= 8;
-    speedOut.textContent = `×${next}`;
-    try { sessionStorage.setItem('hugelkultur-speed', String(next)); } catch { /* this run still hurries */ }
-    paintMeasures();
+    applySpeed(speedFromSlider(speedInput.value), { from: 'slider' });
+    speedNumber.value = String(sim.speed);
   });
-  speed.append(speedName, speedOut, speedInput);
+  const commitSpeedNumber = () => {
+    applySpeed(speedNumber.value, { from: 'number' });
+    speedNumber.value = String(sim.speed);
+    speedInput.value = String(sliderFromSpeed(sim.speed));
+  };
+  speedNumber.addEventListener('change', commitSpeedNumber);
+  speedNumber.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitSpeedNumber();
+      speedNumber.blur();
+    }
+  });
+  speed.append(tipName('Speed', GOD_TIPS.speed), speedNumber, speedInput);
   root.append(speed);
-  for (const [key, label] of MEASURE_KEYS) {
+  for (const [key, label, tip] of MEASURE_KEYS) {
     const wrap = document.createElement('label');
-    const name = document.createElement('span');
-    name.textContent = label;
-    const out = document.createElement('output');
     const input = document.createElement('input');
     input.type = 'range';
     input.min = '0';
     input.max = '100';
     input.step = '1';
     input.dataset.key = key;
-    input.addEventListener('input', () => {
-      sim.measures[sim.spiritId][key] = Number(input.value) / 100;
-      out.textContent = input.value;
+    const number = measureNumber(key, Math.round((wornMeasures(sim)?.[key] || 0) * 100));
+    const setMeasure = value => {
+      const next = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+      sim.measures[sim.spiritId][key] = next / 100;
+      input.value = String(next);
+      number.value = String(next);
       saveMeasures(sim.measures);
       paintMeasures();
+    };
+    input.addEventListener('input', () => setMeasure(input.value));
+    number.addEventListener('change', () => setMeasure(number.value));
+    number.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        setMeasure(number.value);
+        number.blur();
+      }
     });
-    wrap.append(name, out, input);
+    wrap.append(tipName(label, tip), number, input);
     root.append(wrap);
   }
   const homes = document.createElement('div');
   homes.className = 'look-patterns';
   homes.id = 'god-homes';
+  homes.title = GOD_TIPS.home;
   for (const id of ['SPR', 'SUM', 'AUT', 'WIN']) {
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.home = id;
     button.textContent = SEASON_NAME[id];
+    button.title = GOD_TIPS.home;
     button.addEventListener('click', () => {
       sim.measures[sim.spiritId].home = id;
       saveMeasures(sim.measures);
@@ -1346,26 +1636,43 @@ function buildGod() {
     homes.append(button);
   }
   const climb = document.createElement('label');
-  const climbName = document.createElement('span');
-  climbName.textContent = 'Climb';
-  const climbOut = document.createElement('output');
   const climbInput = document.createElement('input');
   climbInput.type = 'range';
   climbInput.min = '0';
   climbInput.max = '80';
   climbInput.step = '1';
   climbInput.dataset.key = 'climb';
+  const climbNumber = measureNumber('climb', sim?.measures?.climb || 0);
+  const setClimb = value => {
+    const raw = Number(value);
+    const next = Math.min(0.8, Math.max(0, Number.isFinite(raw) ? raw : 0));
+    const asPercent = Number(value) > 1 ? Math.min(80, Math.max(0, Math.round(Number(value)))) / 100 : next;
+    sim.measures.climb = Math.min(0.8, Math.max(0, asPercent));
+    climbInput.value = String(Math.round(sim.measures.climb * 100));
+    climbNumber.value = sim.measures.climb.toFixed(2);
+    saveMeasures(sim.measures);
+    paintMeasures();
+  };
   climbInput.addEventListener('input', () => {
     sim.measures.climb = Number(climbInput.value) / 100;
-    climbOut.textContent = `+${sim.measures.climb.toFixed(2)}`;
+    climbNumber.value = sim.measures.climb.toFixed(2);
     saveMeasures(sim.measures);
     paintMeasures();
   });
-  climb.append(climbName, climbOut, climbInput);
+  climbNumber.addEventListener('change', () => setClimb(climbNumber.value));
+  climbNumber.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      setClimb(climbNumber.value);
+      climbNumber.blur();
+    }
+  });
+  climb.append(tipName('Climb', GOD_TIPS.climb), climbNumber, climbInput);
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.id = 'god-reset';
   reset.textContent = 'Original measures';
+  reset.title = GOD_TIPS.reset;
   reset.addEventListener('click', () => {
     sim.measures = blankMeasures();
     saveMeasures(sim.measures);
@@ -1376,6 +1683,7 @@ function buildGod() {
   same.type = 'button';
   same.id = 'god-same';
   same.textContent = 'Same wood';
+  same.title = GOD_TIPS.same;
   same.addEventListener('click', sameWood);
   root.append(homes, climb, reset, same);
 }
@@ -1416,7 +1724,7 @@ function boot() {
   sim.measures = loadMeasures();
   try {
     const savedSpeed = Number(sessionStorage.getItem('hugelkultur-speed'));
-    if (savedSpeed >= 1 && savedSpeed <= 100) sim.speed = savedSpeed;
+    if (savedSpeed >= 1 && savedSpeed <= 1000) sim.speed = savedSpeed;
   } catch { /* the year keeps its own pace */ }
   const saved = fresh ? null : readForest();
   if (saved && saved.seed === forestSeed) {
@@ -1671,14 +1979,19 @@ const floraToggle = document.querySelector('#flora-toggle');
 const floraPanel = document.querySelector('#flora');
 const spiritToggle = document.querySelector('#spirit-toggle');
 const spiritPanel = document.querySelector('#spirits');
+const keepToggle = document.querySelector('#keep-toggle');
+const keepPanel = document.querySelector('#keep');
 
 function setLibrary(which) {
   const floraOpen = which === 'flora';
   const spiritOpen = which === 'spirit';
+  const keepOpen = which === 'keep';
   floraPanel.hidden = !floraOpen;
   spiritPanel.hidden = !spiritOpen;
+  if (keepPanel) keepPanel.hidden = !keepOpen;
   floraToggle.setAttribute('aria-expanded', String(floraOpen));
   spiritToggle.setAttribute('aria-expanded', String(spiritOpen));
+  keepToggle?.setAttribute('aria-expanded', String(keepOpen));
   if (floraOpen) {
     paintFlora(true);
     if (!specimenView) showSpecimen(specimenId);
@@ -1687,17 +2000,140 @@ function setLibrary(which) {
     ensureSpirit(sim.spiritId);
     paintSpirits(true);
   }
+  if (keepOpen) paintKeep(true);
   paintMeasures();
 }
 
 const lookToggle = document.querySelector('#look-toggle');
 const lookPanel = document.querySelector('#look-panel');
+const logToggle = document.querySelector('#log-toggle');
+const logPanel = document.querySelector('#log-panel');
+let featureScores = loadScores();
+let logFilter = 'all';
+
+function dotsRow(id, kind, value) {
+  const track = document.createElement('div');
+  track.className = 'log-track';
+  const label = document.createElement('span');
+  label.textContent = kind === 'feel' ? 'Feel' : 'Look';
+  const dots = document.createElement('div');
+  dots.className = 'log-dots';
+  dots.setAttribute('role', 'group');
+  dots.setAttribute('aria-label', `${kind} score`);
+  for (let n = 1; n <= 5; n++) {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'log-dot' + (n <= value ? ' on' : '');
+    dot.dataset.id = id;
+    dot.dataset.kind = kind;
+    dot.dataset.value = String(n);
+    dot.title = `${kind} ${n} of 5`;
+    dot.setAttribute('aria-pressed', String(n <= value));
+    dots.append(dot);
+  }
+  track.append(label, dots);
+  return track;
+}
+
+function paintLog() {
+  if (!logPanel) return;
+  const summary = scoreSummary(featureScores, logFilter === 'soft' ? 'all' : logFilter);
+  const summaryNode = document.querySelector('#log-summary');
+  if (summaryNode) {
+    const feel = summary.rated ? summary.feel.toFixed(1) : '—';
+    const look = summary.rated ? summary.look.toFixed(1) : '—';
+    summaryNode.textContent = summary.rated
+      ? `Feel ${feel} · Look ${look} · ${summary.rated}/${summary.total} scored · ${summary.soft} soft`
+      : `${summary.total} features. Nothing scored yet.`;
+  }
+  for (const button of logPanel.querySelectorAll('[data-log]')) {
+    button.setAttribute('aria-pressed', String(button.dataset.log === logFilter));
+  }
+  const list = document.querySelector('#log-list');
+  if (!list) return;
+  const rows = FEATURES.filter(item => {
+    if (logFilter === 'fifty' || logFilter === 'keep') return item.list === logFilter;
+    if (logFilter === 'soft') {
+      const s = scoreOf(featureScores, item.id);
+      return !s.feel || !s.look || s.feel < 4 || s.look < 4;
+    }
+    return true;
+  });
+  const frag = document.createDocumentFragment();
+  let section = '';
+  for (const item of rows) {
+    const headKey = `${item.list}:${item.section}`;
+    if (headKey !== section) {
+      section = headKey;
+      const h = document.createElement('p');
+      h.className = 'log-section';
+      h.textContent = `${item.list === 'keep' ? 'Keep' : 'Fifty'} · ${item.section}`;
+      frag.append(h);
+    }
+    const score = scoreOf(featureScores, item.id);
+    const soft = !score.feel || !score.look || score.feel < 4 || score.look < 4;
+    const row = document.createElement('article');
+    row.className = 'log-item' + (soft ? ' soft' : '');
+    row.dataset.id = item.id;
+    const head = document.createElement('div');
+    head.className = 'log-item-head';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = String(item.n).padStart(2, '0');
+    const title = document.createElement('span');
+    title.className = 'tip log-tip';
+    title.tabIndex = 0;
+    title.textContent = item.title;
+    title.dataset.tip = item.tip || item.title;
+    title.setAttribute('aria-label', `${item.title}. ${item.tip || ''}`);
+    head.append(num, title);
+    row.append(head, dotsRow(item.id, 'feel', score.feel), dotsRow(item.id, 'look', score.look));
+    frag.append(row);
+  }
+  list.replaceChildren(frag);
+}
+
 loadLook();
 paintLook();
+paintLog();
 lookToggle.addEventListener('click', () => {
   const open = lookPanel.hidden;
   lookPanel.hidden = !open;
   lookToggle.setAttribute('aria-expanded', String(open));
+  if (open && logPanel && !logPanel.hidden) {
+    logPanel.hidden = true;
+    logToggle?.setAttribute('aria-expanded', 'false');
+  }
+});
+logToggle?.addEventListener('click', () => {
+  if (!logPanel) return;
+  const open = logPanel.hidden;
+  logPanel.hidden = !open;
+  logToggle.setAttribute('aria-expanded', String(open));
+  if (open) {
+    if (!lookPanel.hidden) {
+      lookPanel.hidden = true;
+      lookToggle.setAttribute('aria-expanded', 'false');
+    }
+    paintLog();
+  }
+});
+logPanel?.addEventListener('click', event => {
+  const filter = event.target.closest?.('[data-log]');
+  if (filter) {
+    logFilter = filter.dataset.log;
+    paintLog();
+    return;
+  }
+  const dot = event.target.closest?.('.log-dot');
+  if (!dot) return;
+  const id = dot.dataset.id;
+  const kind = dot.dataset.kind;
+  const value = Number(dot.dataset.value);
+  const current = scoreOf(featureScores, id)[kind];
+  featureScores = setScore(featureScores, id, kind, current === value ? 0 : value);
+  saveScores(featureScores);
+  paintLog();
 });
 for (const input of lookPanel.querySelectorAll('input')) input.addEventListener('input', readLook);
 document.querySelector('#look-fidelity').addEventListener('change', () => {
@@ -1727,6 +2163,7 @@ document.querySelector('#look-reset').addEventListener('click', resetLook);
 
 floraToggle.addEventListener('click', () => setLibrary(floraPanel.hidden ? 'flora' : null));
 spiritToggle.addEventListener('click', () => setLibrary(spiritPanel.hidden ? 'spirit' : null));
+keepToggle?.addEventListener('click', () => setLibrary(keepPanel?.hidden ? 'keep' : null));
 document.querySelector('#specimen-prev').addEventListener('click', () => stepSpecimen(-1));
 document.querySelector('#specimen-next').addEventListener('click', () => stepSpecimen(1));
 const specimenCanvas = document.querySelector('#specimen');
@@ -1770,7 +2207,12 @@ window.addEventListener('keydown', event => {
     lookToggle.setAttribute('aria-expanded', 'false');
     return;
   }
-  if (!floraPanel.hidden || !spiritPanel.hidden) setLibrary(null);
+  if (logPanel && !logPanel.hidden) {
+    logPanel.hidden = true;
+    logToggle?.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  if (!floraPanel.hidden || !spiritPanel.hidden || (keepPanel && !keepPanel.hidden)) setLibrary(null);
 });
 
 requestAnimationFrame(() => requestAnimationFrame(() => {

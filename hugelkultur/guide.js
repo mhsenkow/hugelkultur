@@ -1,6 +1,19 @@
 import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=hold';
 import { seasonOf } from './water.js?v=hold';
-import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater } from './clearing.js?v=hold';
+import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater, wallHeight, eraOf } from './clearing.js?v=hold';
+const DAY_LEN = 64;
+
+function dayPart(time) {
+  const p = ((Number(time) || 0) % DAY_LEN) / DAY_LEN;
+  if (p < 0.7) return 'day';
+  if (p < 0.8) return 'dusk';
+  if (p < 0.94) return 'night';
+  return 'dawn';
+}
+
+function dayIndex(time) {
+  return Math.floor(Math.max(0, Number(time) || 0) / DAY_LEN);
+}
 import { sowWood } from './sticks.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -19,7 +32,16 @@ function climbLimit(sim) {
   return sim?.ford > sim?.time ? 1.2 : 0.4;
 }
 
+function onWall(cell) {
+  if (!cell || cell.hearth) return false;
+  return (cell.cubes || 0) > 0 || !!cell.berm || (cell.layers || 0) >= 3;
+}
+
 function blockedStep(sim, from, to) {
+  if (onWall(from) && onWall(to) && Math.abs(wallHeight(from) - wallHeight(to)) < 0.2) {
+    return Math.abs(walkHeight(to) - walkHeight(from)) > 1.1;
+  }
+  if (to.stair && onWall(from)) return walkHeight(to) - walkHeight(from) > climbLimit(sim) + 0.3;
   return walkHeight(to) - walkHeight(from) > climbLimit(sim);
 }
 
@@ -281,7 +303,7 @@ function woodLeft(sim) {
   return (sim.loose || []).some(stick => !stick.fall);
 }
 
-const BLOCKS = ['dam', 'raise', 'root', 'knit', 'divert', 'race', 'store', 'wood', 'stair'];
+const BLOCKS = ['dam', 'raise', 'root', 'knit', 'divert', 'race', 'unjam', 'sump', 'weir', 'door', 'pave', 'store', 'wood', 'stair', 'prune'];
 const BLOCK_LINE = {
   dam: 'You dam the gap.',
   raise: 'You raise what holds.',
@@ -289,13 +311,170 @@ const BLOCK_LINE = {
   knit: 'You knit the gap.',
   divert: 'You turn the water aside.',
   race: 'You give the water a road.',
+  unjam: 'You take the trunk.',
+  sump: 'You dig a sump.',
+  weir: 'You lay a weir.',
+  door: 'You set the door.',
+  pave: 'You lay a flag.',
   store: 'You keep wood for winter.',
   wood: 'You go for wood.',
-  stair: 'You lay a step.'
+  stair: 'You lay a step.',
+  prune: 'You hold the crown back.'
 };
 
 function seasonFinger(sim) {
   return sim.live?.find(item => item.bit === seasonOf(sim).bit) || null;
+}
+
+function doorGap(sim) {
+  let best = null;
+  let score = -1;
+  for (const cell of sim.cells) {
+    if (cell.hearth || onWall(cell)) continue;
+    let walls = 0;
+    for (const index of neighbors(cell)) {
+      if (onWall(sim.cells[index])) walls += 1;
+    }
+    if (walls < 2) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist <= PAD) continue;
+    if (walls > score) {
+      score = walls;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function waterInsideRing(sim) {
+  for (const cell of sim.cells) {
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist <= PAD || dist > 5.5 || cell.hearth) continue;
+    if ((sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0) > 0.04) return true;
+  }
+  return false;
+}
+
+function sumpGoal(sim, row) {
+  if (!waterInsideRing(sim)) return null;
+  const seen = reachableFrom(sim);
+  let best = null;
+  let dist = -1;
+  for (const cell of sim.cells) {
+    const ring = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (ring <= PAD || ring > 5.2 || cell.hearth || cell.sump) continue;
+    if (!approachable(sim, cell, seen) || !canWork(sim, cell, row)) continue;
+    if (dist < ring) {
+      dist = ring;
+      best = cell;
+    }
+  }
+  if (!best) return null;
+  return { kind: 'cut', method: 'sump', i: best.i, k: best.k, sill: -0.6, sump: true };
+}
+
+function unjamGoal(sim, row) {
+  const seen = reachableFrom(sim);
+  for (const cell of sim.cells) {
+    if (!cell.jam || !approachable(sim, cell, seen)) continue;
+    if (sim.carrying) return { kind: 'unjam', method: 'unjam', i: cell.i, k: cell.k };
+    return { kind: 'walk', method: 'unjam', i: cell.i, k: cell.k, x: cell.x, z: cell.z };
+  }
+  return null;
+}
+
+function weirGoal(sim, row) {
+  const seen = reachableFrom(sim);
+  let best = null;
+  let low = 1e9;
+  for (const cell of sim.cells) {
+    if (!cell.race || cell.weir || cell.hearth) continue;
+    if (!approachable(sim, cell, seen) || !canWork(sim, cell, row)) continue;
+    const h = bedHeight(cell);
+    if (h >= low) continue;
+    low = h;
+    best = cell;
+  }
+  if (!best) return null;
+  if (sim.carrying) return { kind: 'place', method: 'weir', i: best.i, k: best.k };
+  return placeGoal(sim, row, 'weir', best);
+}
+
+function doorGoal(sim, row) {
+  const gap = doorGap(sim);
+  if (!gap) return null;
+  const seen = reachableFrom(sim);
+  if (!approachable(sim, gap, seen)) return null;
+  if (!gap.lintel) {
+    if (sim.carrying && sim.carryKind === 'oak') return { kind: 'lintel', method: 'door', i: gap.i, k: gap.k };
+    if (!sim.carrying && woodLeft(sim)) return placeGoal(sim, row, 'door', gap);
+    const tree = bestTree(sim, row);
+    if (tree) return { kind: 'shake', method: 'door', x: tree.x, z: tree.z };
+    return null;
+  }
+  if (!gap.hurdle) {
+    if (sim.carrying && sim.carryKind === 'willow') return { kind: 'hurdle', method: 'door', i: gap.i, k: gap.k };
+    if (!sim.carrying && woodLeft(sim)) return placeGoal(sim, row, 'door', gap);
+    const tree = bestTree(sim, row);
+    if (tree) return { kind: 'shake', method: 'door', x: tree.x, z: tree.z };
+  }
+  return null;
+}
+
+function paveGoal(sim, row) {
+  const seen = reachableFrom(sim);
+  let best = null;
+  let worn = 0;
+  for (const cell of sim.cells) {
+    if (cell.paved || cell.hearth || !approachable(sim, cell, seen)) continue;
+    const gap = !onWall(cell) && wallNeighborsCount(sim, cell) >= 2;
+    const rank = (cell.worn || 0) + (gap && cell.lintel ? 0.8 : 0);
+    if (rank < 0.45 && !gap) continue;
+    if (rank > worn) {
+      worn = rank;
+      best = cell;
+    }
+  }
+  if (!best) return null;
+  if (sim.carrying && sim.carryKind === 'stone') return { kind: 'place', method: 'pave', i: best.i, k: best.k };
+  return null;
+}
+
+function wallNeighborsCount(sim, cell) {
+  let n = 0;
+  for (const index of neighbors(cell)) {
+    if (onWall(sim.cells[index])) n += 1;
+  }
+  return n;
+}
+
+function highestWall(sim) {
+  const finger = seasonFinger(sim);
+  if (!finger) return null;
+  const [gi, gk] = finger.gate;
+  let best = null;
+  let h = -1;
+  for (const cell of sim.cells) {
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist <= PAD || dist > 4.2 || !onWall(cell)) continue;
+    const toward = Math.hypot(cell.i - gi, cell.k - gk);
+    const height = wallHeight(cell);
+    const score = height - toward * 0.05;
+    if (score > h) {
+      h = score;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+export function wallWalkGoal(sim) {
+  if (eraOf(sim) === 'glade') return null;
+  if (sim._wallKeptDay === dayIndex(sim.time || 0)) return null;
+  if (dayPart(sim.time) !== 'dusk') return null;
+  const wall = highestWall(sim);
+  if (!wall) return null;
+  return { kind: 'look', method: 'wall', x: wall.x, z: wall.z, i: wall.i, k: wall.k, face: Math.atan2(wall.z - HEARTH_K, wall.x - HEARTH_I) };
 }
 
 function openSoil(cell) {
@@ -604,7 +783,69 @@ function methodGoal(sim, row, method) {
     }
   }
   if (method === 'stair') return stairGoal(sim, row, sim.hearth);
+  if (method === 'unjam') return unjamGoal(sim, row);
+  if (method === 'sump') return sumpGoal(sim, row);
+  if (method === 'weir') return weirGoal(sim, row);
+  if (method === 'door') return doorGoal(sim, row);
+  if (method === 'pave') return paveGoal(sim, row);
+  if (method === 'prune') return pruneGoal(sim, row);
   return null;
+}
+
+function wallCellar(sim) {
+  let best = null;
+  let score = -1;
+  for (const cell of sim.cells) {
+    if ((cell.cubes || 0) < 2) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist < PAD || dist > 5.5) continue;
+    const value = (cell.cubes || 0) * 2 - dist * 0.2;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function stashRipeCellar(sim, row) {
+  if (row.eat >= 0.5) return;
+  for (const plot of sim.plots || []) {
+    if (plot.growth < 1) continue;
+    const wall = wallCellar(sim);
+    if (!wall) continue;
+    wall.cellar = wall.cellar || [];
+    if (wall.cellar.length >= 6) continue;
+    wall.cellar.push(plot.crop);
+    plot.growth = 0.08;
+    sim.events?.push({ type: 'note', text: 'You keep the crop in the wall.' });
+    return;
+  }
+}
+
+function cellarWithFood(sim) {
+  let best = null;
+  for (const cell of sim.cells) {
+    if (!cell.cellar?.length) continue;
+    if (!best || cell.cellar.length > best.cellar.length) best = cell;
+  }
+  return best;
+}
+
+function pruneGoal(sim, row) {
+  const tree = (sim.trees || []).find(item => item.planted && !item.fallen && (item.growth || 0) > 2
+    && sim.cells[item.k * GRID + item.i]?.cubes >= 2);
+  if (!tree) return null;
+  const cell = sim.cells[tree.k * GRID + tree.i];
+  if (!cell || !canWork(sim, cell, row)) return null;
+  if (sim.carrying) return { kind: 'prune', i: cell.i, k: cell.k, tree };
+  if (woodLeft(sim)) return null;
+  const spare = (sim.loose || []).filter(stick => !stick.fall);
+  if (spare.length < 2) {
+    if (tree) return { kind: 'shake', method: 'prune', x: tree.x, z: tree.z };
+    return null;
+  }
+  return { kind: 'shake', method: 'prune', x: tree.x, z: tree.z };
 }
 
 function nextBlock(sim, row) {
@@ -612,8 +853,13 @@ function nextBlock(sim, row) {
   const from = BLOCKS.indexOf(guide.method);
   const begin = from < 0 ? 0 : 1;
   const start = from < 0 ? 0 : from;
+  const era = eraOf(sim);
   for (let n = 0; n < BLOCKS.length; n++) {
     const method = BLOCKS[(start + begin + n) % BLOCKS.length];
+    if (era === 'glade' && ['unjam', 'sump', 'weir', 'door', 'pave'].includes(method)) continue;
+    if (method === 'door' && !doorGap(sim)) continue;
+    if (method === 'unjam' && !sim.cells.some(cell => cell.jam)) continue;
+  if (method === 'sump' && (!waterInsideRing(sim) || sim.cells.some(cell => cell.sump))) continue;
     const goal = methodGoal(sim, row, method);
     if (!goal) continue;
     if (guide.method !== method) {
@@ -643,6 +889,7 @@ function canPlug(sim, cell, row) {
 // still lets the year pour over, so she keeps building that cell.
 function seals(sim, cell) {
   if (!cell || cell.hearth || cell.tree) return false;
+  if ((cell.burrow || 0) > 0.6 || cell.crack) return false;
   const built = cell.berm || (cell.cubes || 0) > 0 || (cell.layers || 0) > 0;
   if (!built) return false;
   let wet = 0;
@@ -758,10 +1005,11 @@ function leakPlug(sim, row) {
       prev[index] = queue[head];
       queue.push(index);
       const depth = depthAt(sim, next);
-      if (depth < 0.04) continue;
+      const burrow = (next.burrow || 0) > 0.5;
+      if (depth < 0.04 && !burrow) continue;
       const dist = Math.hypot(next.i - hearth.i, next.k - hearth.k);
       if (dist <= PAD) continue;
-      const score = -dist + depth * 0.25;
+      const score = -dist + depth * 0.25 + burrow * 2.5;
       if (score > threatScore) {
         threatScore = score;
         threat = index;
@@ -893,6 +1141,13 @@ function choose(sim) {
   const blocking = nextBlock(sim, row);
   if (blocking) return blocking;
 
+  stashRipeCellar(sim, row);
+  if (!sim.carrying && seasonOf(sim).id === 'WIN' && row.eat * row.fit > 0.4) {
+    const bare = (sim.plots || []).every(plot => (plot.growth || 0) < 0.45);
+    const wall = cellarWithFood(sim);
+    if (bare && wall) return { kind: 'cellar', i: wall.i, k: wall.k };
+  }
+
   if (!sim.carrying && row.eat * row.fit > 0.55) {
     const food = ripePlot(sim);
     if (food) return { kind: 'eat', id: food.id, x: food.x, z: food.z };
@@ -925,7 +1180,11 @@ function chasePoint(sim, goal) {
     const stand = cell && standOn(sim, cell);
     return stand ? { x: stand.x, z: stand.z } : null;
   }
-  if (goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore') {
+  if (goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore' || goal.kind === 'unjam' || goal.kind === 'walk' || goal.kind === 'lintel' || goal.kind === 'hurdle' || goal.kind === 'cellar' || goal.kind === 'prune') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    return cell ? { x: cell.x, z: cell.z } : null;
+  }
+  if (goal.kind === 'look' && goal.i != null) {
     const cell = sim.cells[goal.k * GRID + goal.i];
     return cell ? { x: cell.x, z: cell.z } : null;
   }
@@ -1002,12 +1261,21 @@ function toward(sim, point) {
 function goalHolds(sim) {
   const goal = sim.guide.goal;
   if (!goal) return false;
-  if (goal.kind === 'look') return sim.guide.pauseUntil > sim.time;
+  if (goal.kind === 'look') {
+    if (goal.method === 'wall') {
+      const st = sim.character?.st;
+      const cell = goal.i != null ? sim.cells[goal.k * GRID + goal.i] : null;
+      return Boolean(st && cell && Math.hypot(st.x - cell.x, st.z - cell.z) > 0.65);
+    }
+    return sim.guide.pauseUntil > sim.time;
+  }
   if (goal.kind === 'attend') return Boolean(goal.tree && goal.tree.sick && !goal.tree.fallen);
   if (goal.kind === 'place') {
     if (!sim.carrying) return false;
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell) return false;
+    if (goal.method === 'weir' && cell.weir) return false;
+    if (goal.method === 'pave' && cell.paved) return false;
     if ((sim.guide.skip.get(keyOf(cell.i, cell.k)) || 0) > sim.time) return false;
     if (cell.rock || cell.log) return false;
     if (cell.berm) return (cell.lift || 0) < liftCap(sim.year);
@@ -1038,15 +1306,28 @@ function goalHolds(sim) {
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell || cell.hearth || cell.tree) return false;
     if ((sim.guide.skip.get(keyOf(cell.i, cell.k)) || 0) > sim.time) return false;
+    if (goal.sump) return !cell.sump;
     if (goal.race && !cell.race) return true;
     return (cell.sill || 0) > goal.sill + 0.04;
   }
+  if (goal.kind === 'unjam') return Boolean(sim.cells[goal.k * GRID + goal.i]?.jam);
+  if (goal.kind === 'lintel' || goal.kind === 'hurdle') return !sim.carrying;
+  if (goal.kind === 'walk') return Boolean(sim.cells[goal.k * GRID + goal.i]?.jam);
   if (goal.kind === 'store') return Boolean(sim.carrying && sim.store);
   if (goal.kind === 'takeStore') {
     return !sim.carrying && (sim.store?.sticks || []).length > 0;
   }
   if (goal.kind === 'rest') return Boolean(sim.holding) && !sim.carrying;
   if (goal.kind === 'shake') return !sim.carrying && sim.loose.length < 10;
+  if (goal.kind === 'cellar') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    return Boolean(cell?.cellar?.length);
+  }
+  if (goal.kind === 'prune') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    const tree = goal.tree;
+    return Boolean(cell && tree && !tree.fallen && (sim.loose || []).filter(stick => !stick.fall).length >= 2);
+  }
   return false;
 }
 
@@ -1060,8 +1341,23 @@ export function steer(sim, dt, playerDriving) {
     return { move: 0, mz: 0 };
   }
   if (!playerDriving && !sim.over && sim.resting === 'home' && sim.bed && sim.character?.st) {
+    const wall = wallWalkGoal(sim);
+    if (wall) {
+      if (guide.method !== 'wall' && !sim.quiet) {
+        guide.method = 'wall';
+        sim.events.push({ type: 'note', text: 'She keeps the wall.' });
+      }
+      guide.goal = wall;
+      const st = sim.character.st;
+      const cell = sim.cells[wall.k * GRID + wall.i];
+      if (cell && Math.hypot(st.x - cell.x, st.z - cell.z) < 0.62) {
+        sim._wallKeptDay = dayIndex(sim.time || 0);
+        guide.goal = null;
+        guide.pauseUntil = sim.time + 1.2;
+      } else return toward(sim, cell || wall);
+    }
     guide.stuck = 0;
-    guide.goal = null;
+    if (!guide.goal) guide.goal = null;
     const home = sim.character.st;
     if (Math.hypot(sim.bed.x - home.x, sim.bed.z - home.z) < 0.42) return { move: 0, mz: 0 };
     return toward(sim, sim.bed);
@@ -1130,6 +1426,7 @@ export function steer(sim, dt, playerDriving) {
         cell.race = true;
         cell.channel = true;
       }
+      if (goal.sump) cell.sump = true;
       sim.bedDirty = true;
       guide.goal = null;
       return { move: 0, mz: 0 };
@@ -1165,6 +1462,39 @@ export function steer(sim, dt, playerDriving) {
     }
     return toward(sim, cell);
   }
+  if (goal.kind === 'cellar') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && cell.cellar?.length) {
+      const crop = cell.cellar.pop();
+      sim.held = crop;
+      sim.eatQueued = true;
+      sim.events.push({ type: 'take', text: 'You take from the cellar.' });
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'prune') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55) {
+      let spent = 0;
+      for (let n = sim.loose.length - 1; n >= 0 && spent < 2; n--) {
+        if (sim.loose[n].fall) continue;
+        sim.loose.splice(n, 1);
+        spent += 1;
+      }
+      if (goal.tree) {
+        goal.tree.growth = Math.min(goal.tree.growth || 2, 1.9);
+        goal.tree.prunedUntil = sim.time + seasonLength(sim) * 2;
+      }
+      sim.events.push({ type: 'note', text: 'You hold the crown back.' });
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
   if (goal.kind === 'plant') {
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell) return { move: 0, mz: 0 };
@@ -1193,6 +1523,52 @@ export function steer(sim, dt, playerDriving) {
     }
     return toward(sim, cell);
   }
+  if (goal.kind === 'unjam') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && cell.jam) {
+      cell.jam = false;
+      sim.bedDirty = true;
+      sim.carryKind = 'oak';
+      sim.carrying = true;
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'lintel' || goal.kind === 'hurdle') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && sim.carrying) {
+      if (goal.kind === 'lintel') cell.lintel = true;
+      else cell.hurdle = true;
+      sim.carrying = false;
+      sim.carryKind = null;
+      sim.bedDirty = true;
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'place' && goal.method === 'weir') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (sim.carrying && Math.hypot(cell.x - st.x, cell.z - st.z) < 0.62) {
+      cell.weir = true;
+      cell.layers = Math.min(5, (cell.layers || 0) + 2);
+      addWeirLayers(cell);
+      sim.carrying = false;
+      sim.carryKind = null;
+      sim.bedDirty = true;
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+  }
   if (goal.kind === 'rest' && Math.hypot(goal.x - st.x, goal.z - st.z) < 0.35) return { move: 0, mz: 0 };
   return toward(sim, goal);
+}
+
+function addWeirLayers(cell) {
+  if (!cell.woods) cell.woods = [];
+  while (cell.woods.length < (cell.layers || 0)) cell.woods.push('oak');
 }

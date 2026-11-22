@@ -195,8 +195,16 @@ function risen(cell) {
 export function walkHeight(cell) {
   if (!cell) return 1e9;
   const land = risen(cell);
+  if (cell.ice && Number.isFinite(cell.iceLevel)) return cell.iceLevel;
   if (cell.plot) return cell.elevation + land + 0.24;
   if (cell.berm) return cell.elevation + land + (cell.rock ? 0.16 : 0.38);
+  const cubes = cell.cubes || 0;
+  if (cubes > 0 && (cell.layers || 0) < 3 && !cell.hearth) {
+    return cell.elevation + land + cubes * 0.74;
+  }
+  if (cell.stair) {
+    return cell.elevation + land + Math.min(cell.layers || 0, 4) * 0.1 + 0.18;
+  }
   // A stack of sticks is a step. Four of them reach a single cube.
   return cell.elevation + land + Math.min(cell.layers || 0, 4) * 0.1;
 }
