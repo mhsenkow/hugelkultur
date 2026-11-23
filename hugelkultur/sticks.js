@@ -10,7 +10,7 @@ import { facedCell } from './avatar.js?v=hold';
 import { floraById } from './species.js?v=hold';
 import { treeForm } from './specimens.js?v=hold';
 import { seasonOf, seasonLength } from './water.js?v=hold';
-import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN } from './clearing.js?v=hold';
+import { woodOf, stickPhrase, phrase, buried, wornMeasures, liftCap, treeScale, fallReady, statureOf, growWood, lifeSpan, blightStrike, beaverWood, YEAR_SPAN, leafHold } from './clearing.js?v=hold';
 
 const CAPACITY = 8400;
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -75,8 +75,29 @@ function surfaceY(sim, x, z, floor) {
   return floor + 0.035;
 }
 
+// One bad stroke must not throw away the rest of the frame: the live crowns and walls are all drawn here.
+function guardDraw(raw, sim) {
+  const skip = error => {
+    if (sim.badStroke) return true;
+    sim.badStroke = error?.stack || String(error);
+    console.warn('A stroke was skipped.', error);
+    return true;
+  };
+  return {
+    get count() { return raw.count; },
+    point(position, options) {
+      try { return raw.point(position, options); } catch (error) { return skip(error); }
+    },
+    streak(a, b, options) {
+      try { return raw.streak(a, b, options); } catch (error) { return skip(error); }
+    },
+    model: (...args) => raw.model(...args)
+  };
+}
+
 export function createStickSystem(B, KIT, sim) {
-  return KIT.frameSplats(B, CAPACITY, draw => {
+  return KIT.frameSplats(B, CAPACITY, raw => {
+    const draw = guardDraw(raw, sim);
     drawMemory(draw, sim);
     drawPlanted(draw, sim);
     drawSticks(draw, sim);
@@ -205,28 +226,35 @@ function drawPlanted(draw, sim) {
     const tones = form?.leaf?.r || [INK.lush, INK.leaf];
     if (tree.group === 'plant') {
       const color = tree.kind === 'ginger' ? 11 : tones[0];
+      const stem = y0 + 0.03 + g * 0.05;
+      draw.streak([tree.x, y0, tree.z], [tree.x, stem, tree.z], {
+        width: 0.018, color: INK.deep, density: 2.1, emissive: false, depth: true
+      });
       const nubs = 5;
       for (let n = 0; n < nubs; n++) {
         const angle = (n / nubs) * Math.PI * 2 + (tree.seed || 1);
-        const reach = (0.04 + g * 0.14) * size;
-        blob(
-          draw,
-          tree.x + Math.cos(angle) * reach,
-          y0 + 0.05 + g * 0.06,
-          tree.z + Math.sin(angle) * reach * 0.75,
-          (0.045 + g * 0.04) * size,
-          color,
-          2
-        );
+        const reach = (0.06 + g * 0.18) * size;
+        const tipY = stem + 0.04 + g * 0.06;
+        const tx = tree.x + Math.cos(angle) * reach;
+        const tz = tree.z + Math.sin(angle) * reach * 0.75;
+        draw.streak([tree.x, stem, tree.z], [tx, tipY, tz], {
+          width: 0.028 + g * 0.012, color, density: 2, emissive: false, depth: true
+        });
+        blob(draw, tx, tipY, tz, (0.03 + g * 0.028) * size, n % 2 ? INK.leaf : color, 2);
       }
       continue;
     }
+    const hold = leafHold(tree.kind, sim.seasonIndex || 0, (sim.seasonTime || 0) / seasonLength(sim));
     // Grove trees are baked at a middle stature. Only the years past that are drawn on top.
     if (!tree.planted) {
-      drawGroveGain(draw, sim, tree, y0, tones, g, size, form);
+      // Its baked crown is cut away for the view, so the growth on top of it goes too.
+      if (tree.shown === 0 && hold > 0) continue;
+      if (hold > 0.45) drawGroveGain(draw, sim, tree, y0, tones, g, size, form);
+      else drawBare(draw, tree, y0, form, hold);
       continue;
     }
-    drawCrown(draw, sim, tree, y0, tones, g, size, form);
+    if (hold > 0.45) drawCrown(draw, sim, tree, y0, tones, g, size, form);
+    else drawBare(draw, tree, y0, form, hold);
   }
   drawBeaver(draw, sim);
 }
@@ -271,6 +299,39 @@ function drawGroveGain(draw, sim, tree, y0, tones, g, size, form) {
   }
 }
 
+function drawBare(draw, tree, y0, form, hold) {
+  const bark = form?.bark?.r?.[0] ?? INK.bark;
+  const seed = tree.seed || 1;
+  const droop = (form?.rise || 0) < 0;
+  const h = Math.min(2.2, (form?.h || 3.2) * 0.5);
+  const spread = Math.min(1.35, (form?.spread || 1.4) * 0.38);
+  const ink = { color: bark, density: 2.2, emissive: false, depth: true };
+  draw.streak([tree.x, y0, tree.z], [tree.x + 0.01, y0 + h * 0.7, tree.z], { ...ink, width: 0.07 });
+  const fork = (x, y, z, ang, reach, lift, width, depth) => {
+    const x1 = x + Math.cos(ang) * reach;
+    const z1 = z + Math.sin(ang) * reach * 0.86;
+    const y1 = y + lift;
+    draw.streak([x, y, z], [x1, y1, z1], { ...ink, width });
+    if (depth <= 0) return;
+    const next = droop ? -Math.abs(lift) * 0.8 : lift * 0.62;
+    fork(x1, y1, z1, ang - 0.55, reach * 0.66, next, Math.max(0.032, width * 0.72), depth - 1);
+    fork(x1, y1, z1, ang + 0.72, reach * 0.58, next * 0.85, Math.max(0.032, width * 0.66), depth - 1);
+  };
+  // Stroke widths under about 0.03 vanish at the default pixel size.
+  for (let n = 0; n < 5; n++) {
+    const ang = hash(seed + n * 9) * Math.PI * 2 + n * 1.26;
+    const y = y0 + h * (0.4 + (n % 3) * 0.12);
+    fork(tree.x, y, tree.z, ang, spread * (0.7 + hash(seed + n) * 0.5), droop ? -0.2 : h * 0.2, 0.052, 2);
+  }
+  if (hold > 0.05) {
+    const leaf = form?.leaf?.r?.[0] ?? INK.leaf;
+    for (let n = 0; n < 3; n++) {
+      const ang = hash(seed + n * 5) * Math.PI * 2;
+      blob(draw, tree.x + Math.cos(ang) * spread * 0.6, y0 + h * 0.6, tree.z + Math.sin(ang) * spread * 0.5, 0.06, leaf, 1.4);
+    }
+  }
+}
+
 function woodName(kind) {
   const name = floraById(kind)?.name || kind || 'tree';
   return name.split(' ').pop().toLowerCase();
@@ -296,6 +357,14 @@ function drawCrown(draw, sim, tree, y0, tones, g, size, form) {
     const top = y0 + h * (grown === 1 ? 0.52 : 0.42);
     draw.streak([x, y0, z], [x + 0.01, top, z], trunk);
   }
+  if (tree.kind === 'birch') {
+    for (let i = 1; i <= 3; i++) {
+      const band = y0 + h * 0.2 * i;
+      draw.streak([tree.x - 0.045, band, tree.z], [tree.x + 0.045, band + 0.006, tree.z], {
+        width: 0.012, color: 1, density: 2.2, emissive: false, depth: true
+      });
+    }
+  }
   const droop = (form?.rise || 0) < 0;
   const limbs = Math.min(shrub ? 4 : 6, Math.max(0, Math.floor(span * 2.1) - 1));
   const seed = tree.seed || 1;
@@ -319,15 +388,24 @@ function drawCrown(draw, sim, tree, y0, tones, g, size, form) {
     const angle = hash(seed + n * 9) * Math.PI * 2;
     const reach = n === 0 ? 0 : spread * (0.22 + hash(seed + n * 5) * 0.78);
     const lift = n === 0 ? radius * 0.2 : (hash(seed + n * 3) - (droop ? 0.7 : 0.35)) * radius;
+    const cx = tree.x + Math.cos(angle) * reach;
+    const cz = tree.z + Math.sin(angle) * reach * 0.86;
     blob(
       draw,
-      tree.x + Math.cos(angle) * reach,
+      cx,
       crown + lift,
-      tree.z + Math.sin(angle) * reach * 0.86,
+      cz,
       radius * (0.82 + hash(seed + n) * 0.36),
       tones[n % tones.length],
       2.1 * fade
     );
+    if (n > 0 && n % 2 === 0) {
+      draw.streak(
+        [tree.x + Math.cos(angle) * reach * 0.35, crown + lift * 0.4, tree.z + Math.sin(angle) * reach * 0.3],
+        [cx, crown + lift + 0.03, cz],
+        { width: 0.012, color: INK.deep, density: 1.7, emissive: false, depth: true }
+      );
+    }
   }
   if (tree.sick) {
     blob(draw, tree.x + 0.05, y0 + h * 0.4, tree.z, 0.05, 6, 1.4);

@@ -61,6 +61,12 @@ test('clearing rules', async () => {
   assert.equal(rules.sparkleSets(4), 0);
   assert.equal(rules.sparkleSets(5), 1);
   assert.equal(rules.sparkleSets(10), 2);
+  assert.equal(rules.leafHold('oak', 1), 1);
+  assert.ok(rules.leafHold('oak', 2, 0) > rules.leafHold('oak', 2, 0.5));
+  assert.equal(rules.leafHold('oak', 2, 0.8), 0);
+  assert.equal(rules.leafHold('oak', 3), 0);
+  assert.ok(rules.leafHold('oak', 0, 0) < rules.leafHold('oak', 0, 1));
+  assert.ok(rules.leafHold('pine', 3) > 0.8);
   assert.equal(rules.fernCount(1), 0);
   assert.equal(rules.fernCount(3), 1);
   assert.equal(rules.fernCount(20), 6);

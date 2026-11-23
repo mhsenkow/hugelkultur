@@ -1,6 +1,6 @@
 import { layGardens } from './gardens.js?v=hold';
 import { sculptTree } from './specimens.js?v=hold';
-import { freshChronicle, gladeBeams } from './clearing.js?v=hold';
+import { freshChronicle, gladeBeams, leafHold } from './clearing.js?v=hold';
 
 export const GRID_SIZES = [16, 32, 64];
 export let GRID = 16;
@@ -676,28 +676,29 @@ function sculptTrees(S, B, cells, grove) {
   const trees = [];
   const box = S.box;
   const ball = S.ball;
+  const tube = S.tube;
   let mark = -1;
-  S.box = (...args) => {
-    const solid = box(...args);
-    if (mark >= 0 && solid) solid.grove = mark;
+  // Leaf stuff carries an alpha in its material. Bark does not. Some leaf dabs bake solid, so the material decides.
+  const tag = (solid, mat) => {
+    if (mark < 0 || !solid) return solid;
+    solid.grove = mark;
+    solid.leafy = mat?.a != null;
     return solid;
   };
-  S.ball = (...args) => {
-    const solid = ball(...args);
-    if (mark >= 0 && solid) solid.grove = mark;
-    return solid;
-  };
+  S.box = (...args) => tag(box(...args), args[2]);
+  S.ball = (...args) => tag(ball(...args), args[2]);
+  S.tube = (...args) => tag(tube(...args), args[3]);
   const prev = S.emit;
   const spot = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   S.emit = (solid, n0, n1) => {
     const tree = solid?.grove != null ? trees[solid.grove] : null;
-    if (tree && n1 > n0) {
+    if (tree && solid.leafy && n1 > n0) {
       for (let i = n0; i < n1; i++) {
         if (!B.dabAt(i, spot)) continue;
         const dx = spot[0] - tree.x;
         const dz = spot[2] - tree.z;
         // Trunks stay. Only this tree's own leaves, not the ground the field happened to credit to it.
-        if (spot[6] >= 1 || dx * dx + dz * dz > 25) continue;
+        if (dx * dx + dz * dz > 25) continue;
         if (!tree.ids) tree.ids = [];
         tree.ids.push(i);
       }
@@ -731,6 +732,7 @@ function sculptTrees(S, B, cells, grove) {
   });
   S.box = box;
   S.ball = ball;
+  S.tube = tube;
   return trees;
 }
 
@@ -749,6 +751,9 @@ export function crownFade(dx, dz, yaw = Math.PI / 4) {
   return 1 - sheer * 0.82;
 }
 
+// The length of autumn and spring in water.js. Leaves turn over that span. world.js cannot import water.js.
+const SEASON_SPAN = 52;
+
 export function veilGrove(sim, st) {
   if (!st?.D || !sim?.trees || !sim.hearth) return;
   const yaw = Number.isFinite(sim.viewYaw) ? sim.viewYaw : Math.PI / 4;
@@ -756,6 +761,7 @@ export function veilGrove(sim, st) {
   const oz = sim.hearth.z;
   const D = st.D;
   const base = st.base;
+  const along = (sim.seasonTime || 0) / SEASON_SPAN;
   for (const tree of sim.trees) {
     if (!tree.ids?.length) continue;
     if (tree.fallen) {
@@ -768,13 +774,14 @@ export function veilGrove(sim, st) {
       }
       continue;
     }
+    const hold = leafHold(tree.kind, sim.seasonIndex || 0, along);
     const fade = crownFade(tree.x - ox, tree.z - oz, yaw);
-    const open = fade < 0.62;
-    if (tree.open === open) continue;
-    tree.open = open;
+    const shown = fade < 0.62 ? 0 : hold;
+    if (tree.shown === shown) continue;
+    tree.shown = shown;
     for (const i of tree.ids) {
       const o = i * 16;
-      D[o + 3] = open ? 0 : base[o + 3];
+      D[o + 3] = shown <= 0 ? 0 : base[o + 3] * shown;
       st.touch(i);
     }
   }
@@ -849,23 +856,27 @@ export function buildWorld(kit, hooks) {
   sculptClearing(S, cells, plan.stones, plan.hollows);
   sim.trees = sculptTrees(S, B, cells, plan.grove);
   SCENE.fidelity = forestFidelity;
-  const hearth = cellCenter(HEARTH_I, HEARTH_K);
+  const stand = sim.hearth;
+  // Straight down, and gathered on the figure, so the column and the light on the ground are the same place.
+  const gaps = [];
+  for (let i = 0; i < 8; i++) {
+    const a = i * 0.8 + 0.3;
+    const q = i === 0 ? 0 : 0.1 + (i % 3) * 0.05;
+    gaps.push([stand.x + Math.cos(a) * q, stand.z + Math.sin(a) * q, 0.18 + (i % 2) * 0.05]);
+  }
   const shafts = KIT.dapple({
-    sun: GRID >= 32 ? [0.08, 0.99, 0.04] : [0.22, 0.95, 0.12],
-    y: GRID >= 32 ? 2.2 : 10,
-    at: [hearth.x, hearth.z],
-    r: 2.7,
-    n: 16,
-    size: GRID >= 32 ? [0.42, 0.85] : [0.11, 0.26],
-    seed: SCENE.seed % 997,
-    floor: GRID >= 32 ? 0.75 : 0.5,
+    sun: [0, 1, 0],
+    y: stand.elevation + (GRID >= 32 ? 3.6 : 8),
+    gaps,
+    at: [stand.x, stand.z],
+    floor: stand.elevation - 0.85,
     under: 0.28,
-    bound: GRID >= 32 ? [hearth.x, hearth.z, 3.4] : [0, 0, 14],
-    cover: (x, z) => Math.hypot(x - hearth.x, z - hearth.z) > PAD + 0.35
+    bound: [stand.x, stand.z, 2.2],
+    cover: (x, z) => Math.hypot(x - stand.x, z - stand.z) > PAD + 0.35
   });
   const firstLight = Math.min(4, shafts.gaps.length);
   const later = shafts.gaps.splice(firstLight);
-  shafts.motes(B, sceneCount(14), [6, 14, 4], { size: 0.03, low: 0.8 });
+  shafts.motes(B, sceneCount(10), [6, 14, 4], { size: 0.028, low: stand.elevation + 0.35 });
   shafts.gaps.push(...later);
   S.bake();
   sim.glade = shafts.air([6, 14, 4, 6, 14, 4], 0.36, 2);
@@ -907,12 +918,13 @@ export function buildWorld(kit, hooks) {
   return sim;
 }
 
-// The same square the ground cell is. What builds up is another of these, not a pile.
+// The same square the ground cell is. Squarer than a mound, still one cheap model.
+// Courses and the pale cap are drawn per column so a keep does not fill the frame.
 function bakeRiseCubes(kit) {
   const { makeBuilder, makeSculpt, KIT } = kit;
   const B = makeBuilder(11, PALETTE, { initialCapacity: 1 << 12 });
   const S = KIT.sculpt(makeSculpt(B));
-  S.box([0, 0, 0], [0.46, 0.37, 0.46], { r: [11, 2, 5, 3] }, { res: 0.34, rd: 0.055 });
+  S.box([0, 0, 0], [0.44, 0.36, 0.44], { r: [11, 2, 5, 3] }, { res: 0.32, rd: 0.028 });
   S.bake();
   const baked = B.finish({
     cam: { target: [0, 0, 0], dist: 4, yaw: Math.PI / 4, pitch: 0.72, fov: 0.66 },

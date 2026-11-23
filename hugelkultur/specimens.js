@@ -110,7 +110,7 @@ export function studyOf(id, take) {
 }
 
 function clump(S, x, y, z, r, mat, resMul = 1) {
-  S.ball([x, y, z], [r, r * 0.62, r * 0.84], mat, { res: Math.max(0.16, r * 0.28) * resMul });
+  S.ball([x, y, z], [r, r * 0.62, r * 0.84], mat, { res: Math.max(0.14, r * 0.24) * resMul });
 }
 
 function crown(S, x, y, z, spread, rise, mat, count, seed, alpha, resMul = 1) {
@@ -153,13 +153,92 @@ const LOOM = {
 
 function trunk(S, x, y0, z, kind) {
   const height = kind.h * 0.7;
-  const res = Math.max(0.16, height * 0.025);
+  const res = Math.max(0.12, height * 0.02);
+  const bark = kind.bark;
+  if (kind.r > 0.08) {
+    S.ball([x, y0 + 0.05, z], [kind.r * 1.65, 0.09, kind.r * 1.35], bark, { res: Math.max(0.07, kind.r * 0.4) });
+  }
   S.box(
-    [x, y0 + height * 0.5, z],
-    [kind.r, height * 0.5, kind.r * 0.82],
-    kind.bark,
-    { res, rd: Math.min(0.08, kind.r * 0.35) }
+    [x, y0 + height * 0.34, z],
+    [kind.r * 1.08, height * 0.34, kind.r * 0.9],
+    bark,
+    { res, rd: Math.min(0.06, kind.r * 0.28) }
   );
+  S.box(
+    [x, y0 + height * 0.74, z],
+    [kind.r * 0.68, height * 0.26, kind.r * 0.56],
+    bark,
+    { res, rd: Math.min(0.05, kind.r * 0.24) }
+  );
+}
+
+function limb(S, x, y, z, yaw, reach, lift, kind) {
+  const r = Math.max(0.035, kind.r * 0.5);
+  S.tube(
+    [
+      [x, y, z],
+      [x + Math.cos(yaw) * reach * 0.55, y + lift * 0.7, z + Math.sin(yaw) * reach * 0.55],
+      [x + Math.cos(yaw) * reach, y + lift, z + Math.sin(yaw) * reach]
+    ],
+    r,
+    r * 0.42,
+    kind.bark,
+    { res: 0.1 }
+  );
+}
+
+// A few marks so a birch, a pine, a willow, and a cherry do not share one crown.
+function accent(S, id, x, y0, z, kind, seed) {
+  if (id === 'birch') {
+    for (let i = 1; i <= 3; i++) {
+      S.box(
+        [x, y0 + kind.h * 0.16 * i, z],
+        [kind.r * 1.22, 0.012, kind.r * 1.02],
+        { r: [1, 11] },
+        { res: 0.045, rd: 0.006 }
+      );
+    }
+    return;
+  }
+  if (id === 'pine' || id === 'hemlock') {
+    S.ball(
+      [x, y0 + kind.h * 0.9, z],
+      [kind.spread * 0.14, kind.h * 0.08, kind.spread * 0.12],
+      kind.leaf,
+      { res: 0.1 }
+    );
+    return;
+  }
+  if (id === 'willow') {
+    for (let n = 0; n < 4; n++) {
+      const a = hash(seed + n * 5) * Math.PI * 2;
+      const reach = kind.spread * 0.7;
+      S.tube(
+        [
+          [x, y0 + kind.h * 0.58, z],
+          [x + Math.cos(a) * reach * 0.45, y0 + kind.h * 0.34, z + Math.sin(a) * reach * 0.45],
+          [x + Math.cos(a) * reach, y0 + kind.h * 0.08, z + Math.sin(a) * reach]
+        ],
+        0.03,
+        0.014,
+        kind.leaf,
+        { res: 0.09 }
+      );
+    }
+    return;
+  }
+  if (id === 'cherry') {
+    for (let n = 0; n < 4; n++) {
+      const a = hash(seed + n * 3) * Math.PI * 2;
+      const reach = kind.spread * 0.32;
+      S.ball(
+        [x + Math.cos(a) * reach, y0 + kind.h * 0.68, z + Math.sin(a) * reach],
+        0.055,
+        { r: [6, 14], a: 0.95 },
+        { res: 0.04 }
+      );
+    }
+  }
 }
 
 export function sculptTree(S, id, x, y0, z, options = {}) {
@@ -188,29 +267,36 @@ export function sculptTree(S, id, x, y0, z, options = {}) {
       kind.r *= Math.min(1.2, scale ** 0.2);
     }
   }
+  const coarse = Boolean(options.lean);
   const stems = kind.stems || 1;
   for (let s = 0; s < stems; s++) {
     const angle = stems === 1 ? 0 : (s / stems) * Math.PI * 2;
     const reach = stems === 1 ? 0 : 0.16 + kind.r;
     trunk(S, x + Math.cos(angle) * reach, y0, z + Math.sin(angle) * reach, kind);
   }
-  if (stems === 1) {
-    const arm = 0.6 + hash(armIndex + 4) * 0.5;
+  if (stems === 1 && !coarse) {
     const yaw = hash(armIndex * 9 + 2) * Math.PI * 2;
-    S.box(
-      [x + Math.cos(yaw) * arm * 0.5, y0 + kind.h * 0.72, z + Math.sin(yaw) * arm * 0.5],
-      [arm * 0.5, kind.r * 0.55, kind.r * 0.7],
-      kind.bark,
-      { res: 0.14, rd: 0.04 }
-    );
+    limb(S, x, y0 + kind.h * 0.62, z, yaw, 0.55 + hash(armIndex + 4) * 0.4, kind.h * 0.06, kind);
+    limb(S, x, y0 + kind.h * 0.42, z, yaw + 2.3, 0.38 + hash(armIndex + 8) * 0.28, kind.h * 0.04, kind);
+    accent(S, id, x, y0, z, kind, seed);
   }
   const alpha = kind.leaf.a * (1 - front) + 0.32 * front;
   const spread = kind.spread * (1 - front * 0.18);
-  const coarse = Boolean(options.lean);
   const resMul = coarse ? 1.35 : 1;
+  // A conifer is tiers that narrow to a point, so it reads as the tree that keeps its needles.
+  if (id === 'pine' || id === 'hemlock') {
+    const tiers = coarse ? 4 : 5;
+    const mat = { r: kind.leaf.r, a: Math.min(0.9, alpha) };
+    for (let t = 0; t < tiers; t++) {
+      const up = t / (tiers - 1);
+      const r = spread * (0.42 - up * 0.32);
+      S.ball([x, y0 + kind.h * (0.3 + up * 0.62), z], [r, kind.h * 0.07, r * 0.9], mat, { res: Math.max(0.12, r * 0.22) * resMul });
+    }
+    return { drop: y0 + kind.h * 0.72 };
+  }
   const clumps = Math.max(coarse ? 5 : 3, Math.round(sceneCount(kind.clumps) * (coarse ? 0.75 : 1)));
   const crownY = y0 + kind.h * (0.7 + kind.lift * 0.15);
-  clump(S, x, crownY + kind.rise * 0.12, z, spread * 0.36, { r: kind.leaf.r, a: Math.min(0.9, alpha) }, resMul);
+  clump(S, x, crownY + kind.rise * 0.12, z, spread * 0.28, { r: kind.leaf.r, a: Math.min(0.9, alpha) }, resMul);
   crown(S, x, crownY, z, spread, kind.rise, kind.leaf, clumps, seed, alpha, resMul);
   if (SCENE.fidelity > 1 && !options.lean) {
     crown(S, x, crownY, z, spread * 0.62, kind.rise * 0.7, kind.leaf, Math.max(4, Math.round(clumps * 0.65)), seed + 101, alpha * 0.85);

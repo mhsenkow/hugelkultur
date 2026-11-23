@@ -364,10 +364,12 @@ function drawSluices(draw, sim) {
     if (!cell.sluice || n >= 8) continue;
     n += 1;
     const y = bedHeight(cell) + (cell.sluice === 'shut' ? 0.6 : 0.35);
-    const post = stroke(5, 0.04);
-    draw.streak([cell.x - 0.12, y, cell.z - 0.08], [cell.x - 0.12, y + 0.45, cell.z - 0.08], post);
-    draw.streak([cell.x + 0.12, y, cell.z + 0.08], [cell.x + 0.12, y + 0.45, cell.z + 0.08], post);
-    draw.streak([cell.x - 0.14, y + 0.42, cell.z - 0.1], [cell.x + 0.14, y + 0.42, cell.z + 0.1], stroke(INK.stick, 0.035));
+    const post = stroke(INK.humus, 0.04);
+    draw.streak([cell.x - 0.14, y, cell.z - 0.08], [cell.x - 0.14, y + 0.48, cell.z - 0.08], post);
+    draw.streak([cell.x + 0.14, y, cell.z + 0.08], [cell.x + 0.14, y + 0.48, cell.z + 0.08], post);
+    draw.streak([cell.x - 0.16, y + 0.46, cell.z - 0.1], [cell.x + 0.16, y + 0.48, cell.z + 0.1], stroke(INK.bark, 0.04));
+    const board = cell.sluice === 'shut' ? 0.34 : 0.16;
+    draw.streak([cell.x - 0.12, y + 0.06, cell.z], [cell.x + 0.12, y + board, cell.z], stroke(INK.soil, board > 0.2 ? 0.09 : 0.05));
   }
 }
 
@@ -407,6 +409,31 @@ function drawFloors(draw, sim) {
   }
 }
 
+function cellNear(sim, cell, di, dk) {
+  const i = cell.i + di;
+  const k = cell.k + dk;
+  if (i < 0 || k < 0 || i >= GRID || k >= GRID) return null;
+  return sim.cells[k * GRID + i] || null;
+}
+
+function isWall(cell) {
+  return !!(cell && ((cell.cubes || 0) > 0 || cell.berm || (cell.layers || 0) >= 3));
+}
+
+function openingOf(sim, cell) {
+  const east = isWall(cellNear(sim, cell, 1, 0));
+  const west = isWall(cellNear(sim, cell, -1, 0));
+  const north = isWall(cellNear(sim, cell, 0, -1));
+  const south = isWall(cellNear(sim, cell, 0, 1));
+  const xWalls = (east ? 1 : 0) + (west ? 1 : 0);
+  const zWalls = (north ? 1 : 0) + (south ? 1 : 0);
+  let top = cell.elevation + 0.78;
+  for (const next of [cellNear(sim, cell, 1, 0), cellNear(sim, cell, -1, 0), cellNear(sim, cell, 0, 1), cellNear(sim, cell, 0, -1)]) {
+    if (isWall(next)) top = Math.max(top, walkHeight(next) - 0.05);
+  }
+  return { alongX: xWalls >= zWalls, top };
+}
+
 function drawStakes(draw, sim) {
   let n = 0;
   for (const cell of sim.cells) {
@@ -414,17 +441,13 @@ function drawStakes(draw, sim) {
     if (wallHeight(cell) >= 1.2) continue;
     n += 1;
     const y = walkHeight(cell) + 0.03;
-    const fade = Math.max(0.2, 1 - wallHeight(cell));
-    draw.streak(
-      [cell.x - 0.16, y, cell.z],
-      [cell.x - 0.04, y, cell.z],
-      stroke(INK.charcoal, 0.012 * fade)
-    );
-    draw.streak(
-      [cell.x + 0.04, y, cell.z],
-      [cell.x + 0.16, y, cell.z],
-      stroke(INK.charcoal, 0.012 * fade)
-    );
+    const fade = Math.max(0.35, 1 - wallHeight(cell));
+    const peg = stroke(INK.charcoal, 0.016 * fade);
+    for (const [ox, oz] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) {
+      draw.streak([cell.x + ox, y, cell.z + oz], [cell.x + ox, y + 0.16 * fade, cell.z + oz], peg);
+    }
+    draw.streak([cell.x - 0.18, y + 0.02, cell.z], [cell.x - 0.05, y + 0.02, cell.z], stroke(INK.humus, 0.014 * fade));
+    draw.streak([cell.x + 0.05, y + 0.02, cell.z], [cell.x + 0.18, y + 0.02, cell.z], stroke(INK.humus, 0.014 * fade));
   }
 }
 
@@ -433,12 +456,35 @@ function drawGrates(draw, sim) {
   for (const cell of sim.cells) {
     if (!cell.grate || n >= 12) continue;
     n += 1;
-    const y = walkHeight(cell) + 0.08;
+    const y = walkHeight(cell) + 0.04;
+    const post = stroke(INK.humus, 0.028);
+    draw.streak([cell.x - 0.16, y, cell.z - 0.14], [cell.x - 0.16, y + 0.28, cell.z + 0.14], post);
+    draw.streak([cell.x + 0.16, y, cell.z - 0.14], [cell.x + 0.16, y + 0.28, cell.z + 0.14], post);
+    draw.streak([cell.x - 0.16, y + 0.28, cell.z - 0.14], [cell.x + 0.16, y + 0.3, cell.z + 0.14], stroke(INK.bark, 0.034));
     for (let i = 0; i < 4; i++) {
-      const x = cell.x - 0.12 + i * 0.08;
-      draw.streak([x, y, cell.z - 0.12], [x, y + 0.22, cell.z + 0.12], stroke(5, 0.02));
+      const x = cell.x - 0.1 + i * 0.066;
+      draw.streak([x, y + 0.02, cell.z - 0.1], [x, y + 0.24, cell.z + 0.1], stroke(INK.charcoal, 0.016));
     }
   }
+}
+
+function clayFace(sim, cell) {
+  let best = null;
+  let low = walkHeight(cell);
+  for (const [di, dk] of STEP) {
+    const next = cellNear(sim, cell, di, dk);
+    if (!next) continue;
+    const h = walkHeight(next);
+    if (h < low - 0.04) {
+      low = h;
+      best = [di, dk];
+    }
+  }
+  if (best) return best;
+  const hx = (sim.hearth?.i ?? HEARTH_I) - cell.i;
+  const hz = (sim.hearth?.k ?? HEARTH_K) - cell.k;
+  if (Math.abs(hx) >= Math.abs(hz)) return [Math.sign(hx) || 1, 0];
+  return [0, Math.sign(hz) || 1];
 }
 
 function drawClay(draw, sim) {
@@ -446,11 +492,16 @@ function drawClay(draw, sim) {
   for (const cell of sim.cells) {
     if (!cell.clay || n >= 16) continue;
     n += 1;
-    const y = walkHeight(cell) * 0.45 + cell.elevation * 0.55;
+    const [di, dk] = clayFace(sim, cell);
+    const ox = di * 0.22;
+    const oz = dk * 0.22;
+    const y0 = cell.elevation + 0.16;
+    const y1 = Math.max(y0 + 0.35, walkHeight(cell) * 0.62);
+    draw.streak([cell.x + ox, y0, cell.z + oz], [cell.x + ox * 0.72, y1, cell.z + oz * 0.72], stroke(INK.soil, 0.08, { density: 1.8 }));
     draw.streak(
-      [cell.x - 0.18, y, cell.z - 0.02],
-      [cell.x + 0.18, y + 0.04, cell.z + 0.02],
-      stroke(12, 0.05, { density: 1.8 })
+      [cell.x + ox - dk * 0.06, y0 + 0.08, cell.z + oz - di * 0.06],
+      [cell.x + ox * 0.7 - dk * 0.04, y1 - 0.04, cell.z + oz * 0.7 - di * 0.04],
+      stroke(INK.sand, 0.028, { density: 1.6 })
     );
   }
 }
@@ -461,11 +512,25 @@ function drawBeams(draw, sim) {
     if (!cell.beam || n >= 16) continue;
     n += 1;
     let top = walkHeight(cell) + 0.2;
+    let xTall = 0;
+    let zTall = 0;
     for (const [di, dk] of STEP) {
-      const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
-      if (next && (next.cubes || 0) >= 2) top = Math.max(top, walkHeight(next) + 0.05);
+      const next = cellNear(sim, cell, di, dk);
+      if (!next || (next.cubes || 0) < 2) continue;
+      top = Math.max(top, walkHeight(next) + 0.06);
+      if (di) xTall += 1;
+      if (dk) zTall += 1;
     }
-    draw.streak([cell.x - 0.28, top, cell.z], [cell.x + 0.28, top + 0.02, cell.z], stroke(5, 0.04));
+    const alongX = xTall >= zTall;
+    const ax = alongX ? 0.34 : 0;
+    const az = alongX ? 0 : 0.34;
+    const px = alongX ? 0 : 0.06;
+    const pz = alongX ? 0.06 : 0;
+    const timber = stroke(INK.bark, 0.042);
+    draw.streak([cell.x - ax - px, top, cell.z - az - pz], [cell.x + ax - px, top + 0.02, cell.z + az - pz], timber);
+    draw.streak([cell.x - ax + px, top + 0.01, cell.z - az + pz], [cell.x + ax + px, top + 0.03, cell.z + az + pz], stroke(5, 0.036));
+    draw.point([cell.x - ax, top + 0.02, cell.z - az], stroke(INK.humus, 0.04));
+    draw.point([cell.x + ax, top + 0.02, cell.z + az], stroke(INK.humus, 0.04));
   }
 }
 
@@ -510,23 +575,44 @@ function drawDoors(draw, sim) {
     if (n >= 16) break;
     if (!cell.lintel && !cell.hurdle) continue;
     n += 1;
-    const y = walkHeight(cell) + (cell.cubes ? (cell.cubes || 0) * 0.45 : 0.62);
+    const { alongX, top } = openingOf(sim, cell);
+    const span = 0.26;
+    const ax = alongX ? span : 0;
+    const az = alongX ? 0 : span;
+    const y0 = cell.elevation + 0.06;
     if (cell.lintel) {
-      const post = stroke(5, 0.028);
-      draw.streak([cell.x - 0.2, cell.elevation + 0.08, cell.z], [cell.x - 0.2, y, cell.z], post);
-      draw.streak([cell.x + 0.2, cell.elevation + 0.08, cell.z], [cell.x + 0.2, y, cell.z], post);
-      draw.streak([cell.x - 0.22, y, cell.z], [cell.x + 0.22, y + 0.02, cell.z], stroke(5, 0.042));
+      const post = stroke(INK.humus, 0.04);
+      draw.streak([cell.x - ax, y0, cell.z - az], [cell.x - ax, top, cell.z - az], post);
+      draw.streak([cell.x + ax, y0, cell.z + az], [cell.x + ax, top, cell.z + az], post);
+      draw.streak(
+        [cell.x - ax * 1.12, top, cell.z - az * 1.12],
+        [cell.x + ax * 1.12, top + 0.03, cell.z + az * 1.12],
+        stroke(INK.bark, 0.055)
+      );
+      draw.streak(
+        [cell.x - ax, top + 0.045, cell.z - az],
+        [cell.x + ax, top + 0.055, cell.z + az],
+        stroke(INK.sand, 0.02)
+      );
+      draw.streak([cell.x, y0 + 0.18, cell.z], [cell.x, top - 0.12, cell.z], stroke(INK.charcoal, 0.03, { density: 1.5 }));
+      draw.point([cell.x + ax * 0.15, top - 0.08, cell.z + az * 0.15], stroke(INK.brass, 0.022, { emissive: true }));
     }
     if (cell.hurdle) {
-      const hy = cell.elevation + 0.12;
-      for (let i = 0; i < 5; i++) {
-        const t = i / 5;
+      const rails = 4;
+      const rise = Math.max(0.28, top - y0 - 0.18);
+      for (let i = 0; i < rails; i++) {
+        const y = y0 + 0.1 + (i / rails) * rise;
         draw.streak(
-          [cell.x - 0.2 + t * 0.4, hy + i * 0.04, cell.z - 0.06],
-          [cell.x - 0.18 + t * 0.36, hy + 0.02 + i * 0.04, cell.z + 0.06],
-          stroke(9, 0.022)
+          [cell.x - ax * 0.86, y, cell.z - az * 0.86],
+          [cell.x + ax * 0.86, y + 0.012, cell.z + az * 0.86],
+          stroke(i % 2 ? INK.deep : INK.lush, 0.03)
         );
       }
+      draw.streak(
+        [cell.x - ax * 0.7, y0 + 0.12, cell.z - az * 0.7],
+        [cell.x + ax * 0.7, top - 0.12, cell.z + az * 0.7],
+        stroke(INK.stick, 0.02)
+      );
     }
   }
 }
@@ -542,6 +628,8 @@ function drawPaved(draw, sim) {
       [cell.x + 0.18, y, cell.z + 0.16],
       stroke(INK.sand, 0.06, { density: 2.2 })
     );
+    draw.streak([cell.x - 0.16, y + 0.01, cell.z], [cell.x + 0.14, y + 0.012, cell.z], stroke(INK.humus, 0.012));
+    draw.streak([cell.x, y + 0.01, cell.z - 0.12], [cell.x + 0.01, y + 0.012, cell.z + 0.12], stroke(INK.humus, 0.012));
   }
 }
 
@@ -631,8 +719,11 @@ function drawPyres(draw, sim) {
     const y = walkHeight(cell) + 0.05;
     if (cell.pyre > 0) {
       // Crossed sticks, then a living flame.
-      draw.streak([cell.x - 0.16, y, cell.z - 0.08], [cell.x + 0.16, y + 0.02, cell.z + 0.1], stroke(INK.bark, 0.05));
-      draw.streak([cell.x - 0.1, y, cell.z + 0.14], [cell.x + 0.12, y + 0.03, cell.z - 0.12], stroke(5, 0.045));
+      draw.point([cell.x - 0.1, y, cell.z - 0.06], stroke(INK.humus, 0.045));
+      draw.point([cell.x + 0.1, y, cell.z + 0.04], stroke(INK.soil, 0.04));
+      draw.point([cell.x, y, cell.z + 0.1], stroke(5, 0.038));
+      draw.streak([cell.x - 0.16, y + 0.02, cell.z - 0.08], [cell.x + 0.16, y + 0.04, cell.z + 0.1], stroke(INK.bark, 0.05));
+      draw.streak([cell.x - 0.1, y + 0.02, cell.z + 0.14], [cell.x + 0.12, y + 0.05, cell.z - 0.12], stroke(5, 0.045));
       const pulse = 0.7 + 0.3 * Math.sin((sim.time || 0) * 3.1 + cell.i);
       const reach = 0.12 + Math.min(0.16, cell.pyre * 0.02) * pulse;
       draw.point([cell.x, y + 0.1 + reach * 0.35, cell.z], stroke(INK.ember, 0.045 + night * 0.02, { density: 1.4, emissive: true }));

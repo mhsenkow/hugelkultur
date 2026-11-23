@@ -60,6 +60,18 @@ export function sparkleSets(year) {
   return Math.floor(Math.max(0, Number(year) || 1) / 5);
 }
 
+// How much of a crown is still in leaf. 0 spring, 1 summer, 2 autumn, 3 winter.
+// along is how far through the season it is, 0 to 1.
+// Pine and hemlock keep their needles. The rest let go through autumn and stand bare in winter.
+export function leafHold(kind, seasonIndex, along = 0) {
+  const season = ((Number(seasonIndex) % 4) + 4) % 4;
+  if (kind === 'pine' || kind === 'hemlock') return season === 3 ? 0.84 : 1;
+  const t = Math.min(1, Math.max(0, Number(along) || 0));
+  if (season === 0) return Math.round((0.5 + t * 0.5) * 10) / 10;
+  if (season === 2) return Math.max(0, Math.round((0.6 - t * 0.9) * 10) / 10);
+  return season === 1 ? 1 : 0;
+}
+
 export function fernCount(year) {
   return Math.min(6, Math.floor(Math.max(0, (Number(year) || 1) - 1) / 2));
 }

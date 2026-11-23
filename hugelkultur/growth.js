@@ -386,13 +386,17 @@ export function drawGrowth(draw, sim) {
       );
     }
     if (cell.stair && (cell.layers || 0) > 0 && !(cell.cubes || 0)) {
-      const y = walkHeight(cell) + 0.02;
+      const steps = Math.min(4, cell.layers || 1);
       const kind = cell.woods?.[0] || cell.lastWood || 'maple';
-      draw.streak(
-        [cell.x - 0.12, y, cell.z - 0.08],
-        [cell.x + 0.12, y + 0.03, cell.z + 0.08],
-        { width: 0.045, color: woodOf(kind).color, density: 2.4, emissive: false, depth: true }
-      );
+      for (let s = 0; s < steps; s++) {
+        const y = cell.elevation + 0.04 + s * 0.09;
+        const inset = s * 0.035;
+        draw.streak(
+          [cell.x - 0.18 + inset, y, cell.z - 0.1],
+          [cell.x + 0.18 - inset, y + 0.02, cell.z + 0.1],
+          { width: 0.04, color: woodOf(kind).color, density: 2.4, emissive: false, depth: true }
+        );
+      }
     }
   }
   drawRelic(draw, sim);
@@ -578,44 +582,62 @@ function drawRises(draw, sim) {
   let left = 160;
   for (const [cell, h] of risen) {
     if (left <= 0) return;
-    const cut = cutScale(sim, cell, h);
-    const drawH = h * cut;
-    const stairHalf = !!cell.stair;
+    const cut = cutScale(sim, cell, h) < 1;
+    // A wall in the way drops to one whole course. A fraction of a block read as a block that vanished.
+    const drawH = cut ? Math.min(h, BRICK) : h;
+    const stairHalf = !!cell.stair && !cut && h < BRICK * 1.35;
+    const yaw = sim.viewYaw || 0;
+    const fx = Math.cos(yaw);
+    const fz = Math.sin(yaw);
+    const mark = { density: 2.4, emissive: false, depth: true };
+    const joint = y => {
+      draw.streak(
+        [cell.x - fz * 0.24, y, cell.z + fx * 0.24],
+        [cell.x + fz * 0.24, y, cell.z - fx * 0.24],
+        { ...mark, width: 0.034, color: INK.charcoal }
+      );
+    };
+    const lip = y => {
+      draw.streak(
+        [cell.x - fx * 0.22, y, cell.z - fz * 0.22],
+        [cell.x + fx * 0.22, y + 0.015, cell.z + fz * 0.22],
+        { ...mark, width: 0.032, color: INK.sand }
+      );
+    };
+    if ((cell.cubes || 0) > 0 && drawH > 0.4) {
+      const x = cell.x - fz * 0.22 - fx * 0.16;
+      const z = cell.z + fx * 0.22 - fz * 0.16;
+      draw.streak([x, cell.elevation + 0.06, z], [x, cell.elevation + drawH - 0.02, z], { ...mark, width: 0.026, color: INK.humus });
+    }
     if (drawH <= BRICK * 1.15 || h > BRICK * 3) {
-      const scale = stairHalf ? 0.5 : Math.min(1.8, Math.max(0.45, drawH / BRICK));
+      const scale = stairHalf ? 0.62 : Math.min(1.8, Math.max(0.62, drawH / BRICK));
       if (!putBrick(draw, cubes, cell, cell.elevation + drawH / 2, scale)) return;
       left -= 1;
-      if (cut < 1) {
-        const y = cell.elevation + drawH + 0.02;
-        draw.streak([cell.x - 0.2, y, cell.z - 0.2], [cell.x + 0.2, y, cell.z + 0.2], {
-          width: 0.03, color: INK.charcoal, density: 2.2, emissive: false, depth: true
-        });
+      if (cut) {
+        const y = cell.elevation + drawH + 0.015;
+        const lid = { width: 0.05, color: INK.charcoal, density: 2.4, emissive: false, depth: true };
+        draw.streak([cell.x - 0.3, y, cell.z - 0.06], [cell.x + 0.3, y, cell.z + 0.06], lid);
+        draw.streak([cell.x - 0.06, y, cell.z - 0.3], [cell.x + 0.06, y, cell.z + 0.3], lid);
+      } else {
+        if (drawH > BRICK * 0.7) joint(cell.elevation + drawH * 0.62);
+        lip(cell.elevation + drawH);
       }
       continue;
     }
     const bricks = Math.min(6, Math.ceil(drawH / BRICK));
     const causes = cell.story || [];
-    const yaw = sim.viewYaw || 0;
-    const fx = Math.cos(yaw);
-    const fz = Math.sin(yaw);
     for (let i = 0; i < bricks - 1 && left > 0; i++) {
       const sy = cell.stair && i === 0 && bricks > 1 ? 0.5 : 1;
       if (!putBrick(draw, cubes, cell, cell.elevation + BRICK / 2 + i * BRICK, sy)) return;
       const cause = causes[i % causes.length] || causes[0];
-      if (cause) {
+      const seamY = cell.elevation + BRICK * (i + 1);
+      joint(seamY);
+      if (cause && i % 2 === 0) {
         const band = BAND[cause] ?? INK.lush;
-        const seamY = cell.elevation + BRICK * (i + 1);
-        if (i % 2 === 0) {
-          draw.streak(
-            [cell.x - fx * 0.22, seamY, cell.z - fz * 0.22],
-            [cell.x + fx * 0.22, seamY + 0.01, cell.z + fz * 0.22],
-            { width: 0.012, color: band, density: 2, emissive: false, depth: true }
-          );
-        }
         draw.streak(
-          [cell.x - fz * 0.2, seamY, cell.z + fx * 0.2],
-          [cell.x + fz * 0.2, seamY, cell.z - fx * 0.2],
-          { width: 0.008, color: INK.charcoal, density: 2.1, emissive: false, depth: true }
+          [cell.x - fx * 0.22, seamY, cell.z - fz * 0.22],
+          [cell.x + fx * 0.22, seamY + 0.01, cell.z + fz * 0.22],
+          { width: 0.012, color: band, density: 2, emissive: false, depth: true }
         );
       }
       left -= 1;
@@ -623,6 +645,7 @@ function drawRises(draw, sim) {
     if (left <= 0) return;
     if (!putBrick(draw, cubes, cell, cell.elevation + drawH - BRICK / 2)) return;
     left -= 1;
+    lip(cell.elevation + drawH);
   }
 }
 
@@ -782,8 +805,8 @@ function drawSparkles(draw, sim) {
   const count = Math.min(36, sets * 10);
   for (let i = 0; i < count; i++) {
     const angle = hash(i * 19) * Math.PI * 2 + sim.time * 0.12;
-    const reach = 0.35 + hash(i * 7) * 2.15;
-    const bob = 0.55 + hash(i * 3) * 1.5 + Math.sin(sim.time * 1.3 + i) * 0.06;
+    const reach = 0.12 + hash(i * 7) * 0.62;
+    const bob = 0.4 + hash(i * 3) * 1.05 + Math.sin(sim.time * 1.3 + i) * 0.05;
     draw.point(
       [cell.x + Math.cos(angle) * reach, cell.elevation + bob, cell.z + Math.sin(angle) * reach],
       { width: 0.028, color: i % 5 === 0 ? INK.brass : 6, density: 1.1, emissive: true, depth: true }

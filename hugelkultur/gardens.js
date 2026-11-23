@@ -234,31 +234,33 @@ function paintPlain(draw, crop, x, y, z, growth) {
 function paintBed(draw, crop, x, y, z, g) {
   draw.streak([x - 0.08, y + 0.012, z], [x + 0.08, y + 0.02, z + 0.02], ink(HUMUS, 0.04));
   if (crop === 'carrot') {
-    const top = y + 0.05 + g * 0.14;
-    draw.streak([x, top, z], [x + 0.015, y + 0.012, z], ink(STICK, 0.055 + g * 0.02));
-    draw.streak([x - 0.02, top - 0.03, z + 0.02], [x + 0.01, y + 0.02, z], ink(STICK, 0.04));
-    draw.streak([x, top, z], [x - 0.09 * (0.45 + g), top + 0.06 + g * 0.04, z - 0.02], ink(LUSH, 0.045));
-    draw.streak([x, top, z], [x + 0.08 * (0.45 + g), top + 0.07 + g * 0.04, z + 0.03], ink(9, 0.04));
-    draw.streak([x, top + 0.01, z], [x + 0.02, top + 0.08 + g * 0.05, z - 0.05], ink(15, 0.035));
+    const top = y + 0.07 + g * 0.18;
+    draw.streak([x, top, z], [x + 0.02, y + 0.02, z], ink(STICK, 0.07 + g * 0.02));
+    draw.streak([x - 0.03, top - 0.04, z + 0.02], [x + 0.015, y + 0.03, z], ink(STICK, 0.05));
+    draw.streak([x, top, z], [x - 0.12 * (0.5 + g), top + 0.08 + g * 0.05, z - 0.03], ink(LUSH, 0.05));
+    draw.streak([x, top, z], [x + 0.11 * (0.5 + g), top + 0.09 + g * 0.05, z + 0.04], ink(9, 0.046));
+    draw.streak([x, top + 0.01, z], [x + 0.03, top + 0.11 + g * 0.06, z - 0.07], ink(15, 0.04));
+    draw.streak([x, top + 0.02, z], [x - 0.04, top + 0.1 + g * 0.04, z + 0.06], ink(LUSH, 0.036));
     return;
   }
   if (crop === 'turnip') {
-    const bulb = 0.055 + g * 0.07;
-    draw.streak([x - bulb, y + 0.045, z], [x + bulb, y + 0.09, z], ink(6, 0.09));
-    draw.streak([x, y + 0.04, z - bulb * 0.7], [x, y + 0.095, z + bulb * 0.7], ink(4, 0.08));
-    const crown = y + 0.095;
-    draw.streak([x, crown, z], [x - 0.09, crown + 0.045 + g * 0.05, z + 0.02], ink(LUSH, 0.045));
-    draw.streak([x, crown, z], [x + 0.1, crown + 0.04 + g * 0.055, z - 0.015], ink(9, 0.04));
+    const bulb = 0.07 + g * 0.09;
+    draw.streak([x - bulb, y + 0.05, z], [x + bulb, y + 0.11, z], ink(6, 0.11));
+    draw.streak([x, y + 0.045, z - bulb * 0.75], [x, y + 0.12, z + bulb * 0.75], ink(4, 0.09));
+    const crown = y + 0.12;
+    draw.streak([x, crown, z], [x - 0.12, crown + 0.06 + g * 0.06, z + 0.03], ink(LUSH, 0.05));
+    draw.streak([x, crown, z], [x + 0.13, crown + 0.055 + g * 0.06, z - 0.02], ink(9, 0.046));
+    draw.streak([x, crown, z], [x + 0.02, crown + 0.08 + g * 0.04, z + 0.08], ink(15, 0.036));
     return;
   }
-  const stem = 0.045 + g * 0.07;
-  const cap = 0.07 + g * 0.09;
+  const stem = 0.06 + g * 0.09;
+  const cap = 0.09 + g * 0.12;
   const cy = y + stem;
-  draw.streak([x, y + 0.012, z], [x + 0.008, cy, z], ink(6, 0.042));
-  draw.streak([x - cap, cy, z], [x, cy + 0.045 + g * 0.03, z + 0.01], ink(13, 0.07));
-  draw.streak([x, cy + 0.045 + g * 0.03, z + 0.01], [x + cap, cy + 0.004, z + 0.02], ink(13, 0.07));
-  draw.streak([x - cap * 0.5, cy + 0.012, z - 0.02], [x + cap * 0.55, cy + 0.018, z + 0.035], ink(EMBER, 0.042));
-  draw.streak([x - 0.025, cy + 0.04, z], [x + 0.02, cy + 0.046, z + 0.015], ink(6, 0.028));
+  draw.streak([x, y + 0.016, z], [x + 0.01, cy, z], ink(6, 0.05));
+  draw.streak([x - cap, cy, z], [x, cy + 0.06 + g * 0.04, z + 0.012], ink(13, 0.085));
+  draw.streak([x, cy + 0.06 + g * 0.04, z + 0.012], [x + cap, cy + 0.006, z + 0.02], ink(13, 0.085));
+  draw.streak([x - cap * 0.55, cy + 0.016, z - 0.03], [x + cap * 0.6, cy + 0.022, z + 0.04], ink(EMBER, 0.05));
+  draw.streak([x - 0.03, cy + 0.05, z], [x + 0.025, cy + 0.058, z + 0.018], ink(6, 0.032));
 }
 
 // The cube plants Bed. Plain stays in the library so the two can be compared.
