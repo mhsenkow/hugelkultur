@@ -1,6 +1,7 @@
 import { GRID, cellAt } from './world.js?v=hold';
 import { seasonOf, seasonLength, sidleGate, markMouth } from './water.js?v=hold';
-import { beginMound, raiseLand, settleMounds, noteEra } from './growth.js?v=hold';
+import { beginMound, raiseLand, settleMounds, noteEra, stoneTheOld } from './growth.js?v=hold';
+import { passStressYear } from './stress.js?v=hold';
 import { yearTitle, freshChronicle, awayLine, noteYear, growWood } from './clearing.js?v=hold';
 
 const FOREST_KEY = 'hugelkultur-forest';
@@ -20,7 +21,10 @@ function cellRow(cell) {
     || cell.worn || cell.ice || cell.jam || cell.sluice || cell.hurdle || cell.lintel || cell.burrow
     || cell.stair || cell.paved || cell.sump || cell.weir || (cell.cellar?.length) || cell.crack || cell.thorn || cell.roofed
     || cell.ivy || cell.bees || (cell.embers || 0) > 0.1
-    || cell.channel;
+    || cell.channel || (cell.pyre || 0) > 0
+    || cell.planned || cell.plannedDoor || cell.grate || cell.gratePlan || cell.clay || cell.moat
+    || cell.beam || cell.sconce || cell.well || cell.keepRoom || cell.dressed || cell.threshold
+    || cell.lined || cell.rotImmune || (cell.rot || 0) > 0 || (cell.heave || 0) > 0 || (cell.fire || 0) > 0;
   if (!lived) return null;
   return {
     i: cell.i,
@@ -82,7 +86,25 @@ function cellRow(cell) {
     ivy: cell.ivy || 0,
     bees: !!cell.bees,
     embers: cell.embers || 0,
-    channel: !!cell.channel
+    channel: !!cell.channel,
+    pyre: cell.pyre || 0,
+    planned: cell.planned || null,
+    plannedDoor: cell.plannedDoor || null,
+    gratePlan: cell.gratePlan || null,
+    grate: !!cell.grate,
+    clay: !!cell.clay,
+    moat: !!cell.moat,
+    beam: !!cell.beam,
+    sconce: !!cell.sconce,
+    well: !!cell.well,
+    keepRoom: cell.keepRoom || null,
+    dressed: !!cell.dressed,
+    threshold: !!cell.threshold,
+    lined: !!cell.lined,
+    rotImmune: !!cell.rotImmune,
+    rot: cell.rot || 0,
+    heave: cell.heave || 0,
+    fire: cell.fire || 0
   };
 }
 
@@ -184,7 +206,12 @@ export function snapshotForest(sim, seed) {
     taught: !!sim.taught,
     era: sim.era || 'glade',
     heldYear: !!sim.heldYear,
-    store: sim.store ? { i: sim.store.i, k: sim.store.k, sticks: (sim.store.sticks || []).slice() } : null,
+    store: sim.store ? {
+      i: sim.store.i,
+      k: sim.store.k,
+      sticks: (sim.store.sticks || []).slice(),
+      chest: sim.store.chest !== false
+    } : null,
     visited: sim.visited || {},
     roomCount: sim.roomCount || 0,
     yearLeaves: sim.yearLeaves ?? Math.max(0, (sim.year || 1) - 1),
@@ -192,7 +219,22 @@ export function snapshotForest(sim, seed) {
     seeds: sim.seeds && typeof sim.seeds === 'object' ? { ...sim.seeds } : {},
     hollows: Array.isArray(sim.hollows) ? sim.hollows.slice() : [],
     outletsEver: sim.outletsEver || 0,
-    endCause: sim.endCause || null
+    endCause: sim.endCause || null,
+    plan: sim.plan && Array.isArray(sim.plan.rooms) ? {
+      v: 1,
+      rooms: sim.plan.rooms.map(room => ({
+        id: room.id,
+        name: room.name,
+        i0: room.i0,
+        k0: room.k0,
+        i1: room.i1,
+        k1: room.k1,
+        door: Array.isArray(room.door) ? room.door.slice(0, 2) : [room.i0, room.k0],
+        closed: !!room.closed,
+        dir: room.dir || 'S'
+      }))
+    } : { v: 1, rooms: [] },
+    cistern: Math.min(1, Math.max(0, Number(sim.cistern) || 0))
   };
 }
 
@@ -301,6 +343,24 @@ export function applyForest(sim, saved) {
     cell.ivy = row.ivy || 0;
     cell.bees = !!row.bees;
     cell.embers = row.embers || 0;
+    cell.pyre = row.pyre || 0;
+    cell.planned = row.planned || null;
+    cell.plannedDoor = row.plannedDoor || null;
+    cell.gratePlan = row.gratePlan || null;
+    cell.grate = !!row.grate;
+    cell.clay = !!row.clay;
+    cell.moat = !!row.moat;
+    cell.beam = !!row.beam;
+    cell.sconce = !!row.sconce;
+    cell.well = !!row.well;
+    cell.keepRoom = row.keepRoom || null;
+    cell.dressed = !!row.dressed;
+    cell.threshold = !!row.threshold;
+    cell.lined = !!row.lined;
+    cell.rotImmune = !!row.rotImmune;
+    cell.rot = row.rot || 0;
+    cell.heave = row.heave || 0;
+    cell.fire = row.fire || 0;
     if (row.channel) cell.channel = true;
     if (row.tree) cell.tree = true;
   }
@@ -309,7 +369,8 @@ export function applyForest(sim, saved) {
   sim.store = saved.store ? {
     i: saved.store.i,
     k: saved.store.k,
-    sticks: Array.isArray(saved.store.sticks) ? saved.store.sticks.slice() : []
+    sticks: Array.isArray(saved.store.sticks) ? saved.store.sticks.slice() : [],
+    chest: saved.store.chest !== false
   } : null;
   sim.visited = saved.visited && typeof saved.visited === 'object' ? { ...saved.visited } : {};
   sim.roomCount = saved.roomCount || 0;
@@ -319,6 +380,21 @@ export function applyForest(sim, saved) {
   sim.hollows = Array.isArray(saved.hollows) ? saved.hollows.slice() : [];
   sim.outletsEver = Number.isFinite(saved.outletsEver) ? saved.outletsEver : 0;
   sim.endCause = saved.endCause === 'breach' || saved.endCause === 'flood' ? saved.endCause : null;
+  sim.plan = saved.plan && Array.isArray(saved.plan.rooms) ? {
+    v: 1,
+    rooms: saved.plan.rooms.map(room => ({
+      id: String(room.id || 'room'),
+      name: String(room.name || 'hall'),
+      i0: room.i0 | 0,
+      k0: room.k0 | 0,
+      i1: room.i1 | 0,
+      k1: room.k1 | 0,
+      door: Array.isArray(room.door) ? room.door.slice(0, 2) : [room.i0 | 0, room.k0 | 0],
+      closed: !!room.closed,
+      dir: room.dir || 'S'
+    }))
+  } : { v: 1, rooms: [] };
+  sim.cistern = Math.min(1, Math.max(0, Number(saved.cistern) || 0));
   if (Array.isArray(saved.loose)) {
     sim.loose = saved.loose.map(stick => ({
       x: stick.x,
@@ -464,6 +540,7 @@ export function passSeason(sim) {
     sim.year += 1;
     sim.chronicle = freshChronicle();
     sim.quiet = false;
+    stoneTheOld(sim);
     settleMounds(sim);
     sim.quiet = true;
   }
@@ -492,6 +569,8 @@ export function passYear(sim) {
     if ((cell.compost || 0) > 0.3) raiseLand(sim, cell, 0.008);
   }
   noteEra(sim);
+  sim.quiet = true;
+  passStressYear(sim);
   sim.quiet = false;
   sim.bedDirty = true;
 }

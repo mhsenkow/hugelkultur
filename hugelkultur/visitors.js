@@ -248,8 +248,24 @@ function crowLoot(sim, visitor) {
   return false;
 }
 
+function bringStick(sim) {
+  const edge = edgeCell(sim, hash((sim.time || 0) * 5 + (sim.year || 1)));
+  if (!edge) return;
+  sim.loose = sim.loose || [];
+  if (sim.loose.length >= 48) return;
+  sim.loose.push({
+    x: edge.x,
+    z: edge.z,
+    yaw: hash(sim.time || 1) * Math.PI,
+    kind: 'birch',
+    age: 0,
+    fall: false
+  });
+  speak(sim, 'A crow brings a stick.');
+}
+
 function dropStickBeyond(sim, visitor) {
-  if (!visitor.carry) return;
+  if (!visitor?.carry) return;
   const edge = edgeCell(sim, hash(sim.time * 5 + visitor.x));
   if (!edge) return;
   sim.loose = sim.loose || [];
@@ -325,7 +341,7 @@ function actWanderer(sim, visitor) {
 
 function actMole(sim, visitor) {
   const cell = cellAt(sim.cells, visitor.x, visitor.z);
-  if (!cell || cell.paved) {
+  if (!cell || cell.paved || cell.clay) {
     visitor.until = sim.time;
     return;
   }
@@ -501,7 +517,7 @@ export function updateVisitors(sim, dt) {
     else if (visitor.kind === 'crow') actCrow(sim, visitor);
     else if (visitor.kind === 'fox') actFox(sim, visitor);
     else if (visitor.kind === 'heron') actHeron(sim, visitor);
-    if (visitor.kind === 'crow' && !visitor.carry && hash(sim.time * 0.3 + visitor.x) < 0.04) dropStickBeyond(sim, visitor);
+    if (visitor.kind === 'crow' && !visitor.carry && hash(sim.time * 0.3 + visitor.x) < 0.04) bringStick(sim);
   }
   sim.visitors = sim.visitors.filter(visitor => visitor.until > sim.time);
 }

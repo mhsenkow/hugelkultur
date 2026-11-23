@@ -12,10 +12,11 @@ import { updateDay, nightAmount, dayPart } from './day.js?v=hold';
 import { createWater, updateWater, seasonOf, clearingDepth, idolDepth, markMouth } from './water.js?v=hold';
 import { steer } from './guide.js?v=hold';
 import { updateVisitors, shoo } from './visitors.js?v=hold';
+import { updateStress } from './stress.js?v=hold';
 import {
   wornMeasures, fitLine, pressureOf, SEASON_LOOK, MOUTH_YAW, MEASURE_KEYS, GOD_TIPS,
   loadMeasures, saveMeasures, blankMeasures, idolLabel, idolStage, SEASON_NAME, woodOf,
-  EDGE_NAME, compassName, liftCap, buried, groundLine, eraOf, roomsOf, wallHeight
+  EDGE_NAME, compassName, liftCap, buried, groundLine, eraOf, roomsOf, wallHeight, endBrow
 } from './clearing.js?v=hold';
 import { readForest, writeForest, clearForest, applyForest, catchUp } from './memory.js?v=hold';
 import { FLORA, floraById } from './species.js?v=hold';
@@ -460,8 +461,10 @@ function paintHud() {
   const veil = document.querySelector('#night');
   const dark = nightAmount(sim.time);
   const era = eraOf(sim);
-  const veilCap = era === 'undercroft' || era === 'keep' ? 0.92 : 0.85;
-  if (veil) veil.style.opacity = (dark * veilCap).toFixed(3);
+  const lookCell = sim.lookFocus ? cellAt(sim.cells, sim.lookFocus.x, sim.lookFocus.z) : null;
+  const roofDark = lookCell?.roofed ? 0.08 : 0;
+  const veilCap = (era === 'undercroft' || era === 'keep' ? 0.92 : 0.85) + roofDark;
+  if (veil) veil.style.opacity = (Math.min(0.94, dark * veilCap + roofDark)).toFixed(3);
   document.body.classList.toggle('night', dark > 0.45);
   const carry = sim.carrying ? 'stick' : sim.held || 'empty';
   const carryNames = { empty: 'nothing', stick: 'a stick', carrot: 'a carrot', turnip: 'a turnip', mushroom: 'a mushroom' };
@@ -499,8 +502,8 @@ function paintHud() {
   const breach = sim.endCause === 'breach';
   const eyebrow = document.querySelector('#end-eyebrow');
   const title = document.querySelector('#end-title');
-  if (eyebrow) eyebrow.textContent = breach ? 'The wall gave way' : 'The idol went under';
-  if (title) title.textContent = breach ? 'Water found a hole' : 'Water climbed the pedestal';
+  if (eyebrow) eyebrow.textContent = endBrow(sim.chronicle, sim.endCause);
+  if (title) title.textContent = sim.chronicle?.fire ? 'Fire opened the way' : (breach ? 'Water found a hole' : 'Water climbed the pedestal');
   const endLine = document.querySelector('#end-line');
   if (endLine) endLine.textContent = breach
     ? 'The keep held high. The wall did not.'
@@ -608,6 +611,13 @@ function paintKeep(force) {
       ctx.fillText(room.name, minI * px + 2, minK * px + Math.max(9, px));
     }
   }
+  ctx.setLineDash([Math.max(2, px * 0.35), Math.max(2, px * 0.28)]);
+  ctx.strokeStyle = 'rgba(90, 62, 46, 0.7)';
+  for (const room of sim.plan?.rooms || []) {
+    if (room.closed) continue;
+    ctx.strokeRect(room.i0 * px + 0.5, room.k0 * px + 0.5, (room.i1 - room.i0 + 1) * px - 1, (room.k1 - room.k0 + 1) * px - 1);
+  }
+  ctx.setLineDash([]);
   const era = eraOf(sim);
   const eraNode = document.querySelector('#keep-era');
   if (eraNode) eraNode.textContent = era.charAt(0).toUpperCase() + era.slice(1);
@@ -621,9 +631,11 @@ function paintKeep(force) {
   if (storeLine) {
     const n = sim.store?.sticks?.length || 0;
     const seeds = Object.values(sim.seeds || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
-    storeLine.textContent = n || seeds
-      ? `Store ${n} stick${n === 1 ? '' : 's'} · ${seeds} seed${seeds === 1 ? '' : 's'}`
-      : 'The store is empty.';
+    const pyres = sim.cells.filter(cell => (cell.pyre || 0) > 0).length;
+    const pyreBit = pyres ? ` · ${pyres} pyre${pyres === 1 ? '' : 's'}` : '';
+    storeLine.textContent = n || seeds || pyres
+      ? `Chest ${n} · ${seeds} seed${seeds === 1 ? '' : 's'}${pyreBit}`
+      : 'The chest is empty.';
   }
   const visitLine = document.querySelector('#keep-visitors');
   if (visitLine) {
@@ -1014,6 +1026,7 @@ function frame(now) {
     applyLook();
     if (sim) sim.viewYaw = yaw;
     aim(dt);
+    if (sim) sim.lookFocus = { x: look.x, z: look.z };
     let step = dt;
     if (focus) {
       sim.attention = (sim.attention || 0) + dt;
@@ -1062,6 +1075,7 @@ function frame(now) {
         updateMotions(sim, bit);
         updateSigns(sim, bit);
         updateVisitors(sim, bit);
+        updateStress(sim, bit);
         updateWater(sim, bit);
         const stand = cellAt(sim.cells, sim.character.st.x, sim.character.st.z);
         if (stand && !stand.hearth) stand.worn = Math.min(2, (stand.worn || 0) + bit * 0.08);

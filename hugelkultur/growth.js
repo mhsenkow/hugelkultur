@@ -1,7 +1,7 @@
 import { INK, hash, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, GRID, cellAt, walkHeight, blockHeights, bedHeight, DIRT_CUBE, DIRT_CAP, brickGain, crownFade } from './world.js?v=hold';
 import { paintCrop, paintLeaf, paintFlake } from './gardens.js?v=hold';
 import { seasonOf, seasonLength, idolDepth } from './water.js?v=hold';
-import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf, eraOf, landCap, ERA_LINE, woodOf } from './clearing.js?v=hold';
+import { circleState, wornMeasures, seasonFit, storyLine, YEAR_SPAN, treeScale, fernCount, sparkleSets, stillWants, wedgeOf, eraOf, landCap, ERA_LINE, woodOf, stoneReady } from './clearing.js?v=hold';
 
 const MOSS = { width: 0.045, color: INK.lush, density: 2, emissive: false, depth: true };
 const DEEP = { width: 0.04, color: INK.deep, density: 2, emissive: false, depth: true };
@@ -161,6 +161,10 @@ function markRoofedCourt(sim) {
   for (const cell of sim.cells || []) {
     if (cell.hearth) continue;
     const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (cell.beam) {
+      cell.roofed = true;
+      continue;
+    }
     if (dist > COURT) {
       if (cell.roofed) cell.roofed = false;
       continue;
@@ -177,7 +181,7 @@ function tendWallTrees(sim, dt) {
   for (const tree of sim.trees || []) {
     if (!tree.planted || tree.fallen || tree.group === 'plant') continue;
     const cell = sim.cells[tree.k * GRID + tree.i];
-    if (!cell || (cell.cubes || 0) < 2) continue;
+    if (!cell || (cell.cubes || 0) < 2 || cell.clay || cell.paved) continue;
     if ((tree.growth || 0) <= 2) continue;
     if (tree.prunedUntil > sim.time) continue;
     if ((tree._splitWait || 0) > sim.time) continue;
@@ -310,7 +314,7 @@ export function updateGrowth(sim, dt) {
       const ivy = Math.min((cell.cubes || 1) + Math.floor((sim.year || 1) - cell.rockAge - 2), (cell.cubes || 1));
       if (ivy > (cell.ivy || 0)) cell.ivy = ivy;
     }
-    if ((cell.burrow || 0) > 0.85 && !cell.paved) {
+    if ((cell.burrow || 0) > 0.85 && !cell.paved && !cell.clay) {
       cell.sill = Math.max(-0.9, (cell.sill || 0) - dt * 0.02);
       sim.bedDirty = true;
     }
@@ -373,6 +377,14 @@ export function drawGrowth(draw, sim) {
     if (cell.parched) drawParched(draw, cell);
     if ((cell.soak || 0) > 0.8) drawKnit(draw, sim, cell);
     if (!cell.berm && (cell.moisture > 0.55 || cell.compost > 0.4) && !cell.hearth && !cell.plot && cell.layers === 0) drawLush(draw, cell);
+    if (cell.dressed && (cell.cubes || 0) > 0) {
+      const y = walkHeight(cell) * 0.5 + cell.elevation * 0.5;
+      draw.streak(
+        [cell.x - 0.16, y, cell.z - 0.16],
+        [cell.x + 0.16, y + 0.02, cell.z + 0.16],
+        { width: 0.02, color: INK.sand, density: 2, emissive: false, depth: true }
+      );
+    }
     if (cell.stair && (cell.layers || 0) > 0 && !(cell.cubes || 0)) {
       const y = walkHeight(cell) + 0.02;
       const kind = cell.woods?.[0] || cell.lastWood || 'maple';
@@ -448,20 +460,56 @@ function settleOne(sim, cell) {
   cell.woods = [];
   cell.settle = 0;
   cell.stood = 0;
-  if (wasRock && !sim.quiet) {
-    sim.carrying = true;
-    sim.carryKind = 'stone';
+  if (wasRock) {
+    cell.dressed = true;
+    if (!sim.carrying) {
+      sim.carrying = true;
+      sim.carryKind = 'stone';
+    } else if (sim.loose && sim.loose.filter(stick => stick.kind === 'stone' && !stick.fall).length < 3) {
+      sim.loose.push({ x: cell.x, z: cell.z, yaw: 0.4, kind: 'stone', age: 0, fall: false });
+    }
     speak(sim, 'stone', 'A flag comes from the stone.');
   }
   return true;
 }
 
+export function stoneTheOld(sim) {
+  if (!sim?.cells) return 0;
+  let made = 0;
+  for (const cell of sim.cells) {
+    if (!cell?.berm || cell.rock || cell.hearth) continue;
+    const salt = ((cell.i * 13 + cell.k * 7) % 100) / 100;
+    if (!stoneReady(cell.stood || 0, salt)) continue;
+    if (compactMound(sim, cell)) made += 1;
+  }
+  const loose = sim.loose || [];
+  const stones = loose.filter(stick => stick.kind === 'stone' && !stick.fall).length;
+  if (stones < 2 && (sim._riverStoneYear || 0) !== sim.year) {
+    const river = sim.cells.find(cell => cell.river && !cell.hearth && !cell.tree);
+    if (river) {
+      sim._riverStoneYear = sim.year;
+      sim.loose = loose;
+      sim.loose.push({ x: river.x, z: river.z, yaw: 0.2, kind: 'stone', age: 0, fall: false });
+      speak(sim, 'stone', 'The river gives a stone.');
+    }
+  }
+  return made;
+}
+
 export function settleMounds(sim) {
   const ready = (sim.cells || []).filter(cell => cell.berm && !cell.hearth);
   if (!ready.length) return 0;
-  for (const cell of ready) settleOne(sim, cell);
+  const settling = [];
+  for (const cell of ready) {
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    const salt = ((cell.i * 13 + cell.k * 7) % 100) / 100;
+    // Outer berms that have stood a year stay up until they become stone.
+    if (!cell.rock && dist > 4.2 && (cell.stood || 0) > YEAR_SPAN * 0.6 && !stoneReady(cell.stood || 0, salt)) continue;
+    if (settleOne(sim, cell)) settling.push(cell);
+  }
+  if (!settling.length) return 0;
   if (!sim.quiet && sim.motions) {
-    ready.slice(0, 12).forEach((cell, index) => {
+    settling.slice(0, 12).forEach((cell, index) => {
       sim.motions.push({
         kind: 'dust',
         t: -index * 0.4,
@@ -472,10 +520,10 @@ export function settleMounds(sim) {
       });
     });
   }
-  sim.berms = 0;
+  sim.berms = (sim.cells || []).filter(cell => cell.berm && !cell.hearth).length;
   sim.bedDirty = true;
-  speak(sim, 'ground', ready.length === 1 ? 'The mound becomes the ground.' : 'The mounds become the ground.');
-  return ready.length;
+  speak(sim, 'ground', settling.length === 1 ? 'The mound becomes the ground.' : 'The mounds become the ground.');
+  return settling.length;
 }
 
 function columnHeight(cell) {
@@ -506,8 +554,10 @@ function putBrick(draw, cubes, cell, y, scaleY = 1) {
 }
 
 function cutScale(sim, cell, h) {
-  if (h < BRICK * 1.2 || !sim.hearth) return 1;
-  const fade = crownFade(cell.x - sim.hearth.x, cell.z - sim.hearth.z, sim.viewYaw);
+  if (h < BRICK * 1.2) return 1;
+  const focus = sim.lookFocus || sim.hearth;
+  if (!focus) return 1;
+  const fade = crownFade(cell.x - focus.x, cell.z - focus.z, sim.viewYaw);
   if (fade >= 0.62) return 1;
   return 0.6;
 }

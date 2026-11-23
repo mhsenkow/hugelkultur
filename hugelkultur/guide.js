@@ -1,6 +1,10 @@
 import { GRID, HEARTH_I, HEARTH_K, PAD, COURT, cellAt, hash, walkHeight, bedHeight } from './world.js?v=hold';
 import { seasonOf } from './water.js?v=hold';
-import { wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf, holdsWater, wallHeight, eraOf } from './clearing.js?v=hold';
+import {
+  wornMeasures, seasonFit, liftCap, buried, EDGE_NAME, woodOf, circleState, wedgeOf,
+  holdsWater, wallHeight, eraOf, STORE_CAP, PYRE_FUEL, PYRE_MAX
+} from './clearing.js?v=hold';
+import { planKeep, WALL_GOAL, moatCells } from './plan.js?v=hold';
 const DAY_LEN = 64;
 
 function dayPart(time) {
@@ -303,20 +307,27 @@ function woodLeft(sim) {
   return (sim.loose || []).some(stick => !stick.fall);
 }
 
-const BLOCKS = ['dam', 'raise', 'root', 'knit', 'divert', 'race', 'unjam', 'sump', 'weir', 'door', 'pave', 'store', 'wood', 'stair', 'prune'];
+const BLOCKS = ['dam', 'raise', 'build', 'root', 'knit', 'divert', 'race', 'moat', 'unjam', 'sump', 'weir', 'door', 'pave', 'clay', 'beam', 'well', 'mend', 'store', 'pyre', 'wood', 'stair', 'prune'];
 const BLOCK_LINE = {
   dam: 'You dam the gap.',
   raise: 'You raise what holds.',
+  build: 'You raise the wall.',
   root: 'You root the mouth.',
   knit: 'You knit the gap.',
   divert: 'You turn the water aside.',
   race: 'You give the water a road.',
+  moat: 'You cut the moat.',
   unjam: 'You take the trunk.',
   sump: 'You dig a sump.',
   weir: 'You lay a weir.',
   door: 'You set the door.',
   pave: 'You lay a flag.',
-  store: 'You keep wood for winter.',
+  clay: 'You line the wall with clay.',
+  beam: 'You lay a beam.',
+  well: 'You dig a well.',
+  mend: 'You mend the wood.',
+  store: 'You keep wood in the chest.',
+  pyre: 'You feed the pyre.',
   wood: 'You go for wood.',
   stair: 'You lay a step.',
   prune: 'You hold the crown back.'
@@ -327,6 +338,11 @@ function seasonFinger(sim) {
 }
 
 function doorGap(sim) {
+  for (const cell of sim.cells) {
+    if (!cell.plannedDoor) continue;
+    if (cell.lintel && cell.hurdle) continue;
+    return cell;
+  }
   let best = null;
   let score = -1;
   for (const cell of sim.cells) {
@@ -734,9 +750,12 @@ function storeGoal(sim, row) {
   const season = seasonOf(sim).id;
   const pile = pickStore(sim);
   if (!pile) return null;
-  sim.store = sim.store || { i: pile.i, k: pile.k, sticks: [] };
+  sim.store = sim.store || { i: pile.i, k: pile.k, sticks: [], chest: true };
+  sim.store.chest = true;
   const sticks = sim.store.sticks || [];
-  if (season === 'AUT' && (sim.loose || []).filter(item => !item.fall).length > 6 && sticks.length < 12) {
+  const loose = (sim.loose || []).filter(item => !item.fall).length;
+  const pack = (season === 'AUT' && loose > 6) || loose > 10;
+  if (pack && sticks.length < STORE_CAP) {
     if (sim.carrying) return { kind: 'store', method: 'store', i: pile.i, k: pile.k };
     const fetch = placeGoal(sim, row, 'store', pile);
     if (fetch) return fetch;
@@ -745,6 +764,296 @@ function storeGoal(sim, row) {
     return { kind: 'takeStore', method: 'store', i: pile.i, k: pile.k };
   }
   return null;
+}
+
+function pyreCount(sim) {
+  return sim.cells.reduce((sum, cell) => sum + ((cell.pyre || 0) > 0 ? 1 : 0), 0);
+}
+
+function pickPyre(sim) {
+  const finger = seasonFinger(sim);
+  const indoors = eraOf(sim) === 'keep' || eraOf(sim) === 'undercroft';
+  let best = null;
+  let score = -1e9;
+  for (const cell of sim.cells) {
+    if (cell.hearth || cell.store || cell.clearing) continue;
+    const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+    if (dist <= PAD || dist > (indoors ? 8.5 : 5.6)) continue;
+    if (indoors) {
+      if ((cell.cubes || 0) < 1 && !cell.pyre && !cell.sconce) continue;
+    } else if ((cell.cubes || 0) > 0 && !cell.pyre) continue;
+    let gate = 0;
+    if (finger) {
+      gate = 3.5 - Math.hypot(cell.i - finger.gate[0], cell.k - finger.gate[1]);
+      if (cell.mouth || cell.oldGate) gate += 1.2;
+    }
+    if ((cell.pyre || 0) > 0 && cell.pyre < PYRE_FUEL) gate += 4;
+    else if ((cell.pyre || 0) >= PYRE_FUEL) continue;
+    else if (pyreCount(sim) >= PYRE_MAX) continue;
+    if (indoors) gate += (cell.planned ? 3.2 : 1.4) + (cell.keepRoom ? 1 : 0);
+    const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+    const value = gate + (depth > 0.03 ? 1.4 : 0) - Math.abs(dist - (indoors ? 4.2 : 3.2)) * 0.3;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function pyreGoal(sim, row) {
+  const loose = (sim.loose || []).filter(item => !item.fall).length;
+  const storeN = sim.store?.sticks?.length || 0;
+  const era = eraOf(sim);
+  const indoors = era === 'keep' || era === 'undercroft';
+  const need = loose > 8 || storeN >= STORE_CAP - 2 || pyreCount(sim) > 0 || (indoors && pyreCount(sim) < PYRE_MAX);
+  if (!need) return null;
+  if (era === 'glade' && loose < 12) return null;
+  const spot = pickPyre(sim);
+  if (!spot) return null;
+  if (sim.carrying) return { kind: 'pyre', method: 'pyre', i: spot.i, k: spot.k };
+  if (storeN > 6) return { kind: 'takeStore', method: 'pyre', i: sim.store.i, k: sim.store.k };
+  if (loose > 0) {
+    const fetch = placeGoal(sim, row, 'pyre', spot);
+    if (fetch) return fetch;
+  }
+  return null;
+}
+
+function openRoomName(sim) {
+  const room = (sim.plan?.rooms || []).find(item => !item.closed);
+  return room?.name || 'keep';
+}
+
+function looseKind(sim, kind) {
+  let best = null;
+  let dist = 1e9;
+  const st = sim.character?.st;
+  (sim.loose || []).forEach((stick, index) => {
+    if (stick.fall || stick.kind !== kind) return;
+    const d = st ? Math.hypot(stick.x - st.x, stick.z - st.z) : 0;
+    if (d < dist) {
+      dist = d;
+      best = index;
+    }
+  });
+  return best;
+}
+
+function fetchKind(sim, kind) {
+  const index = looseKind(sim, kind);
+  const stick = index == null ? null : sim.loose[index];
+  if (!stick) return null;
+  return { kind: 'fetch', x: stick.x, z: stick.z };
+}
+
+function buildGoal(sim, row) {
+  planKeep(sim);
+  if (sim.errand && sim.errand.until > sim.time) {
+    const asked = sim.cells[sim.errand.k * GRID + sim.errand.i];
+    if (asked?.planned && !asked.plannedDoor && wallHeight(asked) < WALL_GOAL && !asked.gratePlan) {
+      if (sim.carrying) return { kind: 'place', method: 'build', i: asked.i, k: asked.k };
+      return placeGoal(sim, row, 'build', asked);
+    }
+  }
+  const seen = reachableFrom(sim);
+  let best = null;
+  let score = -1e9;
+  for (const cell of sim.cells) {
+    if (!cell.planned || cell.plannedDoor || cell.hearth || cell.tree) continue;
+    if (!approachable(sim, cell, seen)) continue;
+    if (cell.gratePlan && !cell.grate) {
+      const value = 6 - Math.hypot(cell.x - sim.character.st.x, cell.z - sim.character.st.z) / 12;
+      if (value > score) {
+        score = value;
+        best = cell;
+      }
+      continue;
+    }
+    if (wallHeight(cell) >= WALL_GOAL) continue;
+    let beside = 0;
+    for (const index of neighbors(cell)) {
+      const next = sim.cells[index];
+      if (wallHeight(next) >= 0.4 || next.berm || (next.cubes || 0) > 0) beside += 1;
+    }
+    const value = beside * 2.2 + (wallHeight(cell) < 0.3 ? 0.6 : 0)
+      - Math.hypot(cell.x - sim.character.st.x, cell.z - sim.character.st.z) / 14;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  if (!best) return null;
+  if (best.gratePlan && !best.grate) {
+    if (sim.carrying && (sim.carryKind === 'stone' || sim.carryKind === 'oak')) {
+      return { kind: 'grate', method: 'build', i: best.i, k: best.k };
+    }
+    if (sim.carrying) return null;
+    return fetchKind(sim, 'stone') || fetchKind(sim, 'oak') || placeGoal(sim, row, 'build', best);
+  }
+  if (sim.carrying && sim.carryKind === 'clay') return null;
+  return placeGoal(sim, row, 'build', best);
+}
+
+function claySpot(sim) {
+  let best = null;
+  let score = -1e9;
+  for (const cell of sim.cells) {
+    if (cell.clay || cell.hearth || cell.grate) continue;
+    if ((cell.cubes || 0) < 1 && !cell.berm) continue;
+    let wet = false;
+    for (const index of neighbors(cell)) {
+      const next = sim.cells[index];
+      const depth = sim.snapshot?.sample?.(next.x, next.z)?.depth || 0;
+      if (depth > 0.03 || (next.moisture || 0) > 0.45) wet = true;
+    }
+    if (!wet && (cell.burrow || 0) < 0.3 && !cell.crack) continue;
+    const value = (cell.burrow || 0) * 3 + (cell.crack ? 2 : 0) - Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) * 0.1;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function clayDig(sim) {
+  let best = null;
+  let silt = 0.5;
+  const st = sim.character.st;
+  for (const cell of sim.cells) {
+    if ((cell.silt || 0) <= silt || cell.hearth || cell.tree) continue;
+    const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
+    if (depth > 0.03) continue;
+    const d = Math.hypot(cell.x - st.x, cell.z - st.z);
+    if ((cell.silt || 0) - d * 0.02 > silt) {
+      silt = cell.silt;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function clayGoal(sim) {
+  const spot = claySpot(sim);
+  if (!spot) return null;
+  if (sim.carrying && sim.carryKind === 'clay') return { kind: 'clay', method: 'clay', i: spot.i, k: spot.k };
+  if (sim.carrying) return null;
+  if (seasonOf(sim).id !== 'SUM' && seasonOf(sim).id !== 'AUT') return null;
+  const dig = clayDig(sim);
+  if (!dig) return null;
+  return { kind: 'dig', method: 'clay', i: dig.i, k: dig.k };
+}
+
+function moatGoal(sim) {
+  const era = eraOf(sim);
+  if (era !== 'keep' && era !== 'undercroft') return null;
+  planKeep(sim);
+  for (const cell of moatCells(sim)) {
+    if (cell.moat && (cell.sill || 0) <= -0.45) continue;
+    if (skipped(sim, keyOf(cell.i, cell.k))) continue;
+    if (cell.hearth || cell.tree) continue;
+    return { kind: 'cut', method: 'moat', moat: true, i: cell.i, k: cell.k, sill: -0.5 };
+  }
+  return null;
+}
+
+function beamGap(sim) {
+  const span = GRID;
+  const tall = cell => !!cell && (cell.cubes || 0) >= 2 && !cell.hearth;
+  for (const cell of sim.cells) {
+    if (cell.beam || cell.hearth || cell.tree || tall(cell)) continue;
+    for (const [di, dk] of [[1, 0], [0, 1]]) {
+      let back = 0;
+      let fore = 0;
+      let a = cell;
+      while (back < 3) {
+        const next = sim.cells[(a.k - dk) * span + (a.i - di)];
+        if (!next || tall(next)) break;
+        if (next.beam) break;
+        a = next;
+        back += 1;
+      }
+      let b = cell;
+      while (fore < 3) {
+        const next = sim.cells[(b.k + dk) * span + (b.i + di)];
+        if (!next || tall(next)) break;
+        if (next.beam) break;
+        b = next;
+        fore += 1;
+      }
+      const behind = sim.cells[(a.k - dk) * span + (a.i - di)];
+      const ahead = sim.cells[(b.k + dk) * span + (b.i + di)];
+      const gap = back + fore + 1;
+      if (gap > 3 || !tall(behind) || !tall(ahead)) continue;
+      return cell;
+    }
+  }
+  return null;
+}
+
+function beamGoal(sim, row) {
+  if (eraOf(sim) === 'glade') return null;
+  const gap = beamGap(sim);
+  if (!gap) return null;
+  if (sim.carrying && sim.carryKind === 'oak') return { kind: 'beam', method: 'beam', i: gap.i, k: gap.k };
+  if (sim.carrying) return null;
+  return fetchKind(sim, 'oak') || placeGoal(sim, row, 'beam', gap);
+}
+
+function wellSpot(sim) {
+  const seen = reachableFrom(sim);
+  let best = null;
+  let score = -1e9;
+  for (const cell of sim.cells) {
+    if (cell.hearth || cell.tree || cell.well || !approachable(sim, cell, seen)) continue;
+    if (cell.keepRoom !== 'cistern' && !cell.sump) continue;
+    const value = (cell.keepRoom === 'cistern' ? 4 : 0) + (cell.sump ? 2 : 0)
+      - Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) * 0.2;
+    if (value > score) {
+      score = value;
+      best = cell;
+    }
+  }
+  return best;
+}
+
+function wellGoal(sim, row) {
+  const era = eraOf(sim);
+  if (era === 'glade') return null;
+  const dug = sim.cells.find(cell => cell.well);
+  if (!dug) {
+    const spot = wellSpot(sim);
+    if (!spot) return null;
+    return { kind: 'cut', method: 'well', well: true, i: spot.i, k: spot.k, sill: -0.6 };
+  }
+  if (!dug.lined) {
+    if (sim.carrying && sim.carryKind === 'stone') return { kind: 'line', method: 'well', i: dug.i, k: dug.k };
+    if (!sim.carrying) return fetchKind(sim, 'stone');
+  }
+  if (sim.drought && (sim.cistern || 0) > 0.08) {
+    const plot = (sim.plots || []).find(item => item.growth < 1 && !(item.watered > 0));
+    if (plot) return { kind: 'water', method: 'well', i: plot.i, k: plot.k };
+  }
+  return null;
+}
+
+function mendGoal(sim) {
+  if (eraOf(sim) === 'glade') return null;
+  let best = null;
+  let rot = 0.45;
+  for (const cell of sim.cells) {
+    if ((cell.rot || 0) <= rot) continue;
+    if (!cell.lintel && !cell.beam && !cell.hurdle && !cell.weir && !cell.plannedDoor) continue;
+    rot = cell.rot;
+    best = cell;
+  }
+  if (!best) return null;
+  if (sim.carrying && (sim.carryKind === 'oak' || sim.carryKind === 'stone')) {
+    return { kind: 'mend', method: 'mend', i: best.i, k: best.k };
+  }
+  if (sim.carrying) return null;
+  return fetchKind(sim, 'oak') || fetchKind(sim, 'stone');
 }
 
 function methodGoal(sim, row, method) {
@@ -769,7 +1078,14 @@ function methodGoal(sim, row, method) {
     if (!cut) return null;
     return { kind: 'cut', method, race: true, i: cut.cell.i, k: cut.cell.k, sill: cut.sill };
   }
+  if (method === 'build') return buildGoal(sim, row);
+  if (method === 'moat') return moatGoal(sim);
+  if (method === 'clay') return clayGoal(sim);
+  if (method === 'beam') return beamGoal(sim, row);
+  if (method === 'well') return wellGoal(sim, row);
+  if (method === 'mend') return mendGoal(sim);
   if (method === 'store') return storeGoal(sim, row);
+  if (method === 'pyre') return pyreGoal(sim, row);
   if (method === 'wood') {
     if (sim.carrying || woodLeft(sim)) return null;
     if ((sim.store?.sticks || []).length) {
@@ -856,7 +1172,8 @@ function nextBlock(sim, row) {
   const era = eraOf(sim);
   for (let n = 0; n < BLOCKS.length; n++) {
     const method = BLOCKS[(start + begin + n) % BLOCKS.length];
-    if (era === 'glade' && ['unjam', 'sump', 'weir', 'door', 'pave'].includes(method)) continue;
+    if (era === 'glade' && ['unjam', 'sump', 'weir', 'door', 'pave', 'clay', 'beam', 'well', 'mend', 'moat'].includes(method)) continue;
+    if (era === 'ring' && method === 'moat') continue;
     if (method === 'door' && !doorGap(sim)) continue;
     if (method === 'unjam' && !sim.cells.some(cell => cell.jam)) continue;
   if (method === 'sump' && (!waterInsideRing(sim) || sim.cells.some(cell => cell.sump))) continue;
@@ -864,7 +1181,8 @@ function nextBlock(sim, row) {
     if (!goal) continue;
     if (guide.method !== method) {
       guide.method = method;
-      sim.events?.push({ type: 'note', text: BLOCK_LINE[method] });
+      const text = method === 'build' ? `You raise the ${openRoomName(sim)} wall.` : BLOCK_LINE[method];
+      sim.events?.push({ type: 'note', text });
     }
     goal.method = method;
     return goal;
@@ -881,6 +1199,7 @@ function depthAt(sim, cell) {
 
 function canPlug(sim, cell, row) {
   if (!canWork(sim, cell, row)) return false;
+  if (cell.plannedDoor || cell.grate) return false;
   if (skipped(sim, keyOf(cell.i, cell.k))) return false;
   return Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K) > PAD;
 }
@@ -889,6 +1208,8 @@ function canPlug(sim, cell, row) {
 // still lets the year pour over, so she keeps building that cell.
 function seals(sim, cell) {
   if (!cell || cell.hearth || cell.tree) return false;
+  if (cell.plannedDoor && ((cell.sill || 0) >= 0.15 || cell.lintel)) return true;
+  if (cell.grate) return false;
   if ((cell.burrow || 0) > 0.6 || cell.crack) return false;
   const built = cell.berm || (cell.cubes || 0) > 0 || (cell.layers || 0) > 0;
   if (!built) return false;
@@ -1180,7 +1501,7 @@ function chasePoint(sim, goal) {
     const stand = cell && standOn(sim, cell);
     return stand ? { x: stand.x, z: stand.z } : null;
   }
-  if (goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore' || goal.kind === 'unjam' || goal.kind === 'walk' || goal.kind === 'lintel' || goal.kind === 'hurdle' || goal.kind === 'cellar' || goal.kind === 'prune') {
+  if (goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore' || goal.kind === 'pyre' || goal.kind === 'unjam' || goal.kind === 'walk' || goal.kind === 'lintel' || goal.kind === 'hurdle' || goal.kind === 'cellar' || goal.kind === 'prune' || goal.kind === 'grate' || goal.kind === 'dig' || goal.kind === 'clay' || goal.kind === 'beam' || goal.kind === 'mend' || goal.kind === 'line' || goal.kind === 'water') {
     const cell = sim.cells[goal.k * GRID + goal.i];
     return cell ? { x: cell.x, z: cell.z } : null;
   }
@@ -1195,7 +1516,7 @@ function chasePoint(sim, goal) {
 function abandon(sim, goal) {
   if (!goal) return;
   const until = sim.time + (goal.kind === 'eat' ? 12 : 8);
-  if (goal.kind === 'place' || goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore') {
+  if (goal.kind === 'place' || goal.kind === 'uncover' || goal.kind === 'cut' || goal.kind === 'store' || goal.kind === 'takeStore' || goal.kind === 'pyre' || goal.kind === 'grate' || goal.kind === 'dig' || goal.kind === 'clay' || goal.kind === 'beam' || goal.kind === 'mend' || goal.kind === 'line' || goal.kind === 'water') {
     sim.guide.skip.set(keyOf(goal.i, goal.k), until);
   } else if (goal.kind === 'eat' && goal.id != null) sim.guide.skip.set(`eat:${goal.id}`, until);
   else if (goal.kind === 'fetch') sim.guide.skip.set(`fetch:${Math.round(goal.x * 2)},${Math.round(goal.z * 2)}`, until);
@@ -1276,6 +1597,7 @@ function goalHolds(sim) {
     if (!cell) return false;
     if (goal.method === 'weir' && cell.weir) return false;
     if (goal.method === 'pave' && cell.paved) return false;
+    if (goal.method === 'build' && (wallHeight(cell) >= WALL_GOAL || !cell.planned)) return false;
     if ((sim.guide.skip.get(keyOf(cell.i, cell.k)) || 0) > sim.time) return false;
     if (cell.rock || cell.log) return false;
     if (cell.berm) return (cell.lift || 0) < liftCap(sim.year);
@@ -1314,6 +1636,23 @@ function goalHolds(sim) {
   if (goal.kind === 'lintel' || goal.kind === 'hurdle') return !sim.carrying;
   if (goal.kind === 'walk') return Boolean(sim.cells[goal.k * GRID + goal.i]?.jam);
   if (goal.kind === 'store') return Boolean(sim.carrying && sim.store);
+  if (goal.kind === 'pyre') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    return Boolean(sim.carrying && cell && (cell.pyre || 0) < PYRE_FUEL);
+  }
+  if (goal.kind === 'grate') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    return Boolean(sim.carrying && cell && !cell.grate);
+  }
+  if (goal.kind === 'dig') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    return Boolean(!sim.carrying && cell && (cell.silt || 0) > 0.2);
+  }
+  if (goal.kind === 'clay') return Boolean(sim.carrying && sim.carryKind === 'clay');
+  if (goal.kind === 'beam') return Boolean(sim.carrying && sim.carryKind === 'oak' && !sim.cells[goal.k * GRID + goal.i]?.beam);
+  if (goal.kind === 'mend') return Boolean(sim.carrying && (sim.cells[goal.k * GRID + goal.i]?.rot || 0) > 0.2);
+  if (goal.kind === 'line') return Boolean(sim.carrying && sim.carryKind === 'stone' && !sim.cells[goal.k * GRID + goal.i]?.lined);
+  if (goal.kind === 'water') return Boolean((sim.cistern || 0) > 0.04 && sim.drought);
   if (goal.kind === 'takeStore') {
     return !sim.carrying && (sim.store?.sticks || []).length > 0;
   }
@@ -1410,6 +1749,16 @@ export function steer(sim, dt, playerDriving) {
     if (!stand) return { move: 0, mz: 0 };
     const here = cellAt(sim.cells, st.x, st.z);
     if (sim.carrying && (here === stand || Math.hypot(stand.x - st.x, stand.z - st.z) < 0.62)) {
+      if (goal.method === 'weir' && !cell.weir) {
+        cell.weir = true;
+        cell.layers = Math.min(5, (cell.layers || 0) + 2);
+        addWeirLayers(cell);
+        sim.carrying = false;
+        sim.carryKind = null;
+        sim.bedDirty = true;
+        guide.goal = null;
+        return { move: 0, mz: 0 };
+      }
       const face = Math.atan2(cell.z - st.z, cell.x - st.x);
       sim.placeQueued = true;
       return { move: Math.cos(face) * 0.4, mz: Math.sin(face) * 0.4, face };
@@ -1427,6 +1776,16 @@ export function steer(sim, dt, playerDriving) {
         cell.channel = true;
       }
       if (goal.sump) cell.sump = true;
+      if (goal.moat) {
+        cell.moat = true;
+        cell.race = true;
+        cell.channel = true;
+      }
+      if (goal.well) {
+        cell.well = true;
+        cell.sump = true;
+        cell.keepRoom = cell.keepRoom || 'cistern';
+      }
       sim.bedDirty = true;
       guide.goal = null;
       return { move: 0, mz: 0 };
@@ -1437,13 +1796,35 @@ export function steer(sim, dt, playerDriving) {
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell) return { move: 0, mz: 0 };
     if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && sim.carrying) {
-      sim.store = sim.store || { i: cell.i, k: cell.k, sticks: [] };
-      if (sim.store.sticks.length < 12) {
+      sim.store = sim.store || { i: cell.i, k: cell.k, sticks: [], chest: true };
+      sim.store.chest = true;
+      if (sim.store.sticks.length < STORE_CAP) {
         sim.store.sticks.push(sim.carryKind || 'maple');
         cell.store = true;
         sim.carrying = false;
         sim.carryKind = null;
-        sim.events.push({ type: 'note', text: 'You keep wood for winter.' });
+        sim.events.push({ type: 'note', text: 'You keep wood in the chest.' });
+      }
+      guide.goal = null;
+      return { move: 0, mz: 0 };
+    }
+    return toward(sim, cell);
+  }
+  if (goal.kind === 'pyre') {
+    const cell = sim.cells[goal.k * GRID + goal.i];
+    if (!cell) return { move: 0, mz: 0 };
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && sim.carrying) {
+      const before = cell.pyre || 0;
+      cell.pyre = Math.min(PYRE_FUEL, before + 1);
+      const indoors = eraOf(sim) === 'keep' || eraOf(sim) === 'undercroft';
+      if (indoors || (cell.cubes || 0) > 0) cell.sconce = true;
+      sim.carrying = false;
+      sim.carryKind = null;
+      if (!sim.quiet) {
+        sim.events.push({
+          type: 'note',
+          text: before > 0 ? 'You feed the fire.' : (cell.sconce ? 'You set a sconce.' : 'You light a pyre at the gate.')
+        });
       }
       guide.goal = null;
       return { move: 0, mz: 0 };
@@ -1456,7 +1837,7 @@ export function steer(sim, dt, playerDriving) {
     if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55 && (sim.store?.sticks || []).length) {
       sim.carryKind = sim.store.sticks.pop() || 'maple';
       sim.carrying = true;
-      sim.events.push({ type: 'take', text: 'You take from the store.' });
+      sim.events.push({ type: 'take', text: 'You take from the chest.' });
       guide.goal = null;
       return { move: 0, mz: 0 };
     }
@@ -1550,19 +1931,62 @@ export function steer(sim, dt, playerDriving) {
     }
     return toward(sim, cell);
   }
-  if (goal.kind === 'place' && goal.method === 'weir') {
+  if (goal.kind === 'grate' || goal.kind === 'clay' || goal.kind === 'beam' || goal.kind === 'mend' || goal.kind === 'line' || goal.kind === 'dig' || goal.kind === 'water') {
     const cell = sim.cells[goal.k * GRID + goal.i];
     if (!cell) return { move: 0, mz: 0 };
-    if (sim.carrying && Math.hypot(cell.x - st.x, cell.z - st.z) < 0.62) {
-      cell.weir = true;
-      cell.layers = Math.min(5, (cell.layers || 0) + 2);
-      addWeirLayers(cell);
-      sim.carrying = false;
-      sim.carryKind = null;
-      sim.bedDirty = true;
+    if (Math.hypot(cell.x - st.x, cell.z - st.z) < 0.55) {
+      if (goal.kind === 'dig' && !sim.carrying) {
+        cell.silt = Math.max(0, (cell.silt || 0) - 0.55);
+        sim.carrying = true;
+        sim.carryKind = 'clay';
+        if (!sim.quiet) sim.events.push({ type: 'take', text: 'You cut clay from the silt.' });
+      } else if (goal.kind === 'clay' && sim.carrying) {
+        cell.clay = true;
+        cell.burrow = 0;
+        sim.carrying = false;
+        sim.carryKind = null;
+        sim.bedDirty = true;
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'You line the wall with clay.' });
+      } else if (goal.kind === 'grate' && sim.carrying) {
+        cell.grate = true;
+        cell.lintel = true;
+        sim.carrying = false;
+        sim.carryKind = null;
+        sim.bedDirty = true;
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'The water passes. Nothing else does.' });
+      } else if (goal.kind === 'beam' && sim.carrying) {
+        cell.beam = true;
+        cell.roofed = true;
+        sim.carrying = false;
+        sim.carryKind = null;
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'You lay a beam.' });
+      } else if (goal.kind === 'mend' && sim.carrying) {
+        cell.rot = 0;
+        cell.rotImmune = true;
+        cell._rotted = false;
+        if (sim.carryKind === 'stone') cell.paved = true;
+        if (!cell.lintel && cell.plannedDoor) cell.lintel = true;
+        sim.carrying = false;
+        sim.carryKind = null;
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'You mend the wood.' });
+      } else if (goal.kind === 'line' && sim.carrying) {
+        cell.lined = true;
+        cell.paved = true;
+        cell.well = true;
+        sim.carrying = false;
+        sim.carryKind = null;
+        sim.bedDirty = true;
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'You line the well with stone.' });
+      } else if (goal.kind === 'water' && (sim.cistern || 0) > 0.04) {
+        const plot = (sim.plots || []).find(item => item.i === cell.i && item.k === cell.k);
+        if (plot) plot.watered = 12;
+        sim.cistern = Math.max(0, sim.cistern - 0.12);
+        if (!sim.quiet) sim.events.push({ type: 'note', text: 'You water the bed.' });
+      }
       guide.goal = null;
       return { move: 0, mz: 0 };
     }
+    return toward(sim, cell);
   }
   if (goal.kind === 'rest' && Math.hypot(goal.x - st.x, goal.z - st.z) < 0.35) return { move: 0, mz: 0 };
   return toward(sim, goal);

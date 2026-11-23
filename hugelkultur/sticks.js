@@ -441,6 +441,7 @@ function addWood(cell, kind) {
 }
 
 function knitWillow(sim, cell) {
+  if (sim.drought) return;
   let best = null;
   let score = -1;
   for (const [di, dk] of STEP) {
@@ -839,6 +840,15 @@ function placeStick(sim) {
     return;
   }
   const kind = sim.carryKind || 'maple';
+  if (kind === 'clay') {
+    cell.clay = true;
+    cell.burrow = 0;
+    sim.carrying = false;
+    sim.carryKind = null;
+    sim.bedDirty = true;
+    sim.events.push({ type: 'note', text: 'You line the wall with clay.' });
+    return;
+  }
   const wood = woodOf(kind);
   if (cell.log) {
     sim.events.push({ type: 'note', text: 'A trunk lies there.' });

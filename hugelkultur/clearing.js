@@ -32,6 +32,11 @@ export const DEFAULT_MEASURES = {
 
 export const CLIMB = 0.22;
 export const YEAR_SPAN = 52 * 3 + 84;
+// The chest holds more than a loose pile. Pyres eat the rest, slowly.
+export const STORE_CAP = 18;
+export const PYRE_FUEL = 6;
+export const PYRE_MAX = 3;
+export const PYRE_BURN = 48;
 
 const TREE_SIZES = [0.52, 0.74, 1, 1.32, 1.68];
 
@@ -158,7 +163,8 @@ export const WOOD = {
   willow: { weight: 0.72, slide: 0.18, bridge: 1, root: 0, sticks: 1, color: 9, half: 0.5, label: 'willow' },
   alder: { weight: 0.84, slide: 0.1, bridge: 0, root: 1, sticks: 1, color: 12, half: 0.36, label: 'alder' },
   maple: { weight: 0.9, slide: 0.28, bridge: 0, root: 0, sticks: 1, color: 10, half: 0.36, label: 'maple' },
-  stone: { weight: 1.8, slide: 0.04, bridge: 0, root: 0, sticks: 1, color: 1, half: 0.28, label: 'stone' }
+  stone: { weight: 1.8, slide: 0.04, bridge: 0, root: 0, sticks: 1, color: 1, half: 0.28, label: 'stone' },
+  clay: { weight: 1.1, slide: 0.02, bridge: 0, root: 0, sticks: 1, color: 12, half: 0.22, label: 'clay' }
 };
 
 export const OPEN_CROWN = new Set(['maple', 'birch', 'ash', 'willow', 'hemlock', 'alder', 'serviceberry', 'cherry']);
@@ -263,19 +269,28 @@ const WEDGE_NAME = ['west', 'northwest', 'north', 'northeast', 'east', 'southeas
 export function holdsWater(cell) {
   if (!cell || cell.hearth) return false;
   if (cell.sluice === 'shut') return true;
+  if (cell.grate) return false;
+  // A staked door keeps a sill, so the ring still counts as holding.
+  if (cell.plannedDoor || cell.threshold) return true;
   return !!cell.berm || (cell.layers || 0) >= 3 || (cell.cubes || 0) > 0 || !!cell.dam;
 }
 
 // What stops what. A wall that holds water may still let a deer through.
 export function stops(cell, kind) {
   if (!cell || cell.hearth) return false;
+  if (cell.grate) {
+    if (kind === 'water') return false;
+    if (kind === 'beast' || kind === 'people') return true;
+  }
   const cubes = cell.cubes || 0;
   const berm = !!cell.berm;
   const layers = cell.layers || 0;
   const wall = berm || cubes > 0 || layers >= 3 || !!cell.dam || cell.sluice === 'shut';
   const tall = cubes >= 2 || (berm && (cell.lift || 0) >= 2);
+  const moat = !!cell.moat && !!cell.moatDeep && (cell.sill || 0) <= -0.45;
   if (kind === 'water') return wall || (cell.sill || 0) <= -0.55;
   if (kind === 'beast') {
+    if (moat) return true;
     if (cell.hurdle || cell.thorn) return true;
     return cubes >= 1 || berm || !!cell.dam;
   }
@@ -300,7 +315,9 @@ export function roomsOf(cells, hearthI = 8, hearthK = 8, pad = 1.85) {
   const rooms = [];
   const wallStep = 0.9;
   const indexOf = (i, k) => (i < 0 || k < 0 || i >= span || k >= span ? -1 : k * span + i);
-  const isWall = cell => wallHeight(cell) >= wallStep;
+  // A staked wall holds the room on the map before the cubes are up.
+  // The door stays open until it has a lintel, so the new room still joins the court.
+  const isWall = cell => wallHeight(cell) >= wallStep || !!cell.grate || !!cell.lintel || !!cell.planned;
   for (let start = 0; start < list.length; start++) {
     if (seen[start] || isWall(list[start])) continue;
     const queue = [start];
@@ -316,9 +333,9 @@ export function roomsOf(cells, hearthI = 8, hearthK = 8, pad = 1.85) {
       const cell = list[at];
       members.push(cell);
       if (cell.hearth) hasHearth = true;
-      if (cell.store) hasStore = true;
-      if ((cell.sill || 0) <= -0.55 || cell.sump) hasSump = true;
-      if (cell.plot || cell.fruit) hasGarden = true;
+      if (cell.store || cell.keepRoom === 'store') hasStore = true;
+      if ((cell.sill || 0) <= -0.55 || cell.sump || cell.keepRoom === 'cistern' || cell.well) hasSump = true;
+      if (cell.plot || cell.fruit || cell.keepRoom === 'garden') hasGarden = true;
       if (cell.i === 0 || cell.k === 0 || cell.i === span - 1 || cell.k === span - 1) edge = true;
       for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const next = indexOf(cell.i + di, cell.k + dk);
@@ -340,7 +357,40 @@ export function roomsOf(cells, hearthI = 8, hearthK = 8, pad = 1.85) {
   return rooms;
 }
 
+function eraPrint(sim) {
+  let walls = 0;
+  let cubes = 0;
+  let berms = 0;
+  let roofed = 0;
+  const cells = sim?.cells || [];
+  for (let n = 0; n < cells.length; n++) {
+    const cell = cells[n];
+    if (!cell) continue;
+    cubes += cell.cubes || 0;
+    if (cell.berm) berms += 1;
+    if (cell.roofed || cell.beam) roofed += 1;
+    if ((cell.cubes || 0) > 0 || cell.berm || (cell.layers || 0) >= 3 || cell.lintel || cell.grate || cell.beam) {
+      walls += n + (cell.cubes || 0) * 17;
+    }
+  }
+  const eraBit = sim?.era === 'undercroft' ? 4 : sim?.era === 'keep' ? 3 : sim?.era === 'ring' ? 2 : 1;
+  return walls + cubes * 131 + berms * 977 + roofed * 10007
+    + (sim?.heldYear ? 13 : 0) + (sim?.circleSaid ? 29 : 0) + (sim?.holding ? 5 : 0)
+    + (sim?.year || 0) * 17 + eraBit;
+}
+
 export function eraOf(sim) {
+  const print = eraPrint(sim);
+  if (sim && sim._eraPrint === print && sim._eraValue) return sim._eraValue;
+  const value = eraNow(sim);
+  if (sim) {
+    sim._eraPrint = print;
+    sim._eraValue = value;
+  }
+  return value;
+}
+
+function eraNow(sim) {
   const cells = sim?.cells || [];
   const hearth = sim?.hearth || cells.find(cell => cell.hearth);
   const hi = hearth?.i ?? 8;
@@ -472,6 +522,11 @@ export function idolLabel(stage) {
 
 export function yearTitle(chronicle) {
   if (chronicle?.breach) return 'The year the wall broke.';
+  if (chronicle?.fire) return 'The year the fire came.';
+  if (chronicle?.rot) return 'The year the door fell.';
+  if (chronicle?.heave) return 'The year the frost lifted the wall.';
+  if (chronicle?.seep) return 'The year water rose through the floor.';
+  if (chronicle?.drought) return 'The year the pond went dry.';
   if (chronicle?.heron) return 'The year the heron stayed.';
   if (chronicle?.drank) return 'The year the idol drank.';
   if (chronicle?.circle) return 'The year the circle held.';
@@ -520,8 +575,23 @@ export function freshChronicle() {
     river: false,
     visitor: null,
     room: false,
-    breach: false
+    breach: false,
+    heron: false,
+    fire: false,
+    rot: false,
+    heave: false,
+    seep: false,
+    drought: false
   };
+}
+
+export function endBrow(chronicle, endCause) {
+  if (chronicle?.fire) return 'The keep burned. The water came after.';
+  if (chronicle?.rot) return 'The door fell. The water came after.';
+  if (chronicle?.heave) return 'The frost lifted the wall.';
+  if (chronicle?.seep) return 'Water rose through the floor.';
+  if (endCause === 'breach') return 'The wall gave way';
+  return 'The idol went under';
 }
 
 export const ERA_LINE = {

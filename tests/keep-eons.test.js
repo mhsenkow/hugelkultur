@@ -63,16 +63,22 @@ test('era and rooms rise from the land', async () => {
     for (const cell of ringCells(cells)) mound(cell);
     growth.settleMounds(sim);
   }
-  // Leave a store pocket inside a second wall so rooms appear.
-  const store = cells[5 * 16 + 5];
-  store.store = true;
-  for (const [i, k] of [[4, 4], [4, 5], [4, 6], [5, 4], [5, 6], [6, 4], [6, 5], [6, 6]]) {
-    const cell = cells[k * 16 + i];
+  const plan = await import('../hugelkultur/plan.js');
+  plan.planKeep(sim);
+  assert.ok(sim.plan.rooms.some(room => room.name === 'store' && !room.closed), 'the druid stakes a store');
+  for (const cell of cells) {
+    if (!cell.planned || cell.plannedDoor) continue;
     cell.cubes = 2;
     cell.block = [0.74, 0.74];
+    cell.berm = false;
   }
+  const door = cells.find(cell => cell.plannedDoor);
+  assert.ok(door, 'the store has a door');
+  door.lintel = true;
+  plan.planKeep(sim);
   const rooms = rules.roomsOf(cells, 8, 8, 1.85);
-  assert.ok(rooms.some(room => room.name === 'store' || room.name === 'hall'), JSON.stringify(rooms.map(r => r.name)));
+  assert.ok(rooms.some(room => room.name === 'store'), JSON.stringify(rooms.map(r => r.name)));
+  assert.equal(rules.eraOf(sim), 'keep');
   assert.equal(rules.stops({ cubes: 1 }, 'beast'), true);
   assert.equal(rules.stops({ cubes: 1 }, 'people'), false);
   assert.equal(rules.stops({ cubes: 2 }, 'people'), true);

@@ -1,6 +1,7 @@
 import { GRID, ORIGIN, FLOW, bedHeight, cellAt, isMouth, copyFingers, revealGlade, HEARTH_I, HEARTH_K, COURT, PAD, hash } from './world.js?v=hold';
 import { pressureOf, idolStage, yearTitle, freshChronicle, holdsWater, EDGE_NAME, SEASON_NAME, noteYear, idolVoice, eraOf, wedgeOf } from './clearing.js?v=hold';
-import { settleMounds, noteEra, raiseLand } from './growth.js?v=hold';
+import { settleMounds, noteEra, raiseLand, stoneTheOld } from './growth.js?v=hold';
+import { planKeep } from './plan.js?v=hold';
 
 export const SEASON_LENGTH = 52;
 
@@ -356,7 +357,12 @@ function closeStoreSeason(sim) {
   const depth = sim.snapshot?.sample?.(cell.x, cell.z)?.depth || 0;
   if (depth > 0.03) {
     sim.store.sticks.pop();
-    if (!sim.quiet) sim.events.push({ type: 'note', text: 'The woodpile loses a stick.' });
+    if (!sim.quiet) {
+      sim.events.push({
+        type: 'note',
+        text: sim.store.chest ? 'The chest takes water. A stick is lost.' : 'The woodpile loses a stick.'
+      });
+    }
   }
 }
 
@@ -406,7 +412,11 @@ export function closeSeason(sim) {
     noteEra(sim);
   }
   if (!sim.quiet) sim.events.push({ type: 'season', text: seasonOf(sim).line });
-  if (rolled) settleMounds(sim);
+  if (rolled) {
+    stoneTheOld(sim);
+    settleMounds(sim);
+  }
+  planKeep(sim);
   markMouth(sim);
   return finished;
 }
@@ -498,9 +508,16 @@ export function updateWater(sim, dt) {
       sim.solver.step(tick, {
         friction: current.friction + (sim.cells.some(cell => cell.ice) ? 0.12 : 0),
         rain: (x, z) => {
+          const cell = cellAt(sim.cells, x, z);
           let rate = atMouth(sim.cells, x, z, current.edge) ? Math.min(8, current.inflow * press * freshet) : 0;
-          const thaw = Number(cellAt(sim.cells, x, z)?.thaw);
+          if (sim.drought) rate *= 0.12;
+          const thaw = Number(cell?.thaw);
           if (Number.isFinite(thaw) && thaw > 0) rate += Math.min(0.02, thaw);
+          if ((sim.seep || 0) > 0 && cell && !cell.hearth && !cell.paved && !cell.sump && !cell.well) {
+            const dist = Math.hypot(cell.i - HEARTH_I, cell.k - HEARTH_K);
+            const inKeep = dist <= COURT || !!cell.keepRoom;
+            if (inKeep) rate += Math.min(0.04, sim.seep);
+          }
           return rateOf(rate);
         },
         drain: (x, z, _t, state) => {
@@ -508,6 +525,10 @@ export function updateWater(sim, dt) {
           if (atMouth(sim.cells, x, z, leave)) rate += 0.04;
           const cell = cellAt(sim.cells, x, z);
           if (cell?.outlet) rate += 0.05;
+          if ((cell?.pyre || 0) > 0) rate += 0.03;
+          if (cell?.grate) rate += 0.03;
+          if (cell?.sump || cell?.well) rate += 0.04;
+          if (sim.drought) rate *= 2;
           if (current.id === 'SUM' && cell && !cell.channel && !cell.race) rate += 0.02;
           if (current.id === 'SUM' && cell?.channel) rate *= 0.7;
           if (state.depth < 0.02) rate += 0.012;

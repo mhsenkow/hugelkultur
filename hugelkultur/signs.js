@@ -1,6 +1,9 @@
 import { INK, GRID, ORIGIN, HEARTH_I, HEARTH_K, PAD, COURT, PEDESTAL, hash, cellAt, bedHeight, walkHeight } from './world.js?v=hold';
 import { seasonOf, seasonLength, idolDepth, OPPOSITE } from './water.js?v=hold';
-import { idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants, roomsOf, woodOf } from './clearing.js?v=hold';
+import {
+  idolStage, holdsWater, wedgeOf, MOUTH_YAW, pressureOf, wornMeasures, seasonFit, stillWants,
+  roomsOf, woodOf, PYRE_BURN, PYRE_MAX, wallHeight
+} from './clearing.js?v=hold';
 import { nightAmount, dayIndex } from './day.js?v=hold';
 
 const STEP = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -72,7 +75,64 @@ export function closeStoreSeason(sim) {
   const depth = waterAt(sim, cell.x, cell.z)?.depth || 0;
   if (depth > 0.03) {
     sim.store.sticks.pop();
-    if (!sim.quiet) sim.events.push({ type: 'note', text: 'The woodpile loses a stick.' });
+    if (!sim.quiet) {
+      sim.events.push({
+        type: 'note',
+        text: sim.store.chest ? 'The chest takes water. A stick is lost.' : 'The woodpile loses a stick.'
+      });
+    }
+  }
+}
+
+export function updatePyres(sim, dt) {
+  if (!(dt > 0) || !sim.cells) return;
+  sim.pyreBurn = (sim.pyreBurn || 0) + dt;
+  let lit = 0;
+  for (const cell of sim.cells) {
+    if (!(cell.pyre > 0)) continue;
+    lit += 1;
+    // Warmth: snow and damp leave the ring of the fire.
+    cell.snow = Math.max(0, (cell.snow || 0) - dt * 0.08);
+    cell.moisture = Math.max(0, (cell.moisture || 0) - dt * 0.12);
+    cell.ice = false;
+    cell.parched = true;
+    const reach = cell.sconce ? 2 : 1;
+    for (let dk = -reach; dk <= reach; dk++) {
+      for (let di = -reach; di <= reach; di++) {
+        if (!di && !dk) continue;
+        const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+        if (!next || next.hearth) continue;
+        const fall = cell.sconce ? 0.05 : 0.04;
+        next.snow = Math.max(0, (next.snow || 0) - dt * fall);
+        next.moisture = Math.max(0, (next.moisture || 0) - dt * (cell.sconce ? 0.07 : 0.06));
+        if (next.ice && (next.moisture || 0) < 0.2) next.ice = false;
+      }
+    }
+    // Standing water thins; what leaves becomes mist.
+    const hit = waterAt(sim, cell.x, cell.z);
+    if (hit && hit.depth > 0.02) {
+      cell.mist = Math.min(1, (cell.mist || 0) + dt * 0.35);
+      cell.thaw = Math.min(0.02, (cell.thaw || 0) + dt * 0.004);
+    } else {
+      cell.mist = Math.max(0, (cell.mist || 0) - dt * 0.08);
+    }
+  }
+  if (lit && sim.pyreBurn >= PYRE_BURN) {
+    sim.pyreBurn = 0;
+    for (const cell of sim.cells) {
+      if (!(cell.pyre > 0)) continue;
+      cell.pyre = Math.max(0, cell.pyre - 1);
+      if (cell.pyre <= 0 && !sim.quiet) {
+        sim.events.push({ type: 'note', text: 'The pyre burns low.' });
+      }
+      break;
+    }
+  }
+  if (lit > PYRE_MAX) {
+    // Keep the newest fires; older empty stacks go cold.
+    const fires = sim.cells.filter(cell => cell.pyre > 0)
+      .sort((a, b) => (b.pyre || 0) - (a.pyre || 0));
+    for (let i = PYRE_MAX; i < fires.length; i++) fires[i].pyre = 0;
   }
 }
 
@@ -87,6 +147,7 @@ export function updateSigns(sim, dt) {
   updateFlies(sim);
   tendStoreParched(sim);
   warnBees(sim);
+  updatePyres(sim, dt);
 }
 
 function tendStoreParched(sim) {
@@ -211,6 +272,7 @@ export function drawSigns(draw, sim) {
   drawOutlets(draw, sim);
   drawRaces(draw, sim);
   drawStore(draw, sim);
+  drawPyres(draw, sim);
   drawCellars(draw, sim);
   drawWorn(draw, sim);
   drawSummerMemory(draw, sim);
@@ -231,7 +293,14 @@ export function drawSigns(draw, sim) {
   drawSumps(draw, sim);
   drawSluices(draw, sim);
   drawWeirs(draw, sim);
+  drawFloors(draw, sim);
+  drawStakes(draw, sim);
   drawDoors(draw, sim);
+  drawGrates(draw, sim);
+  drawClay(draw, sim);
+  drawBeams(draw, sim);
+  drawFire(draw, sim);
+  drawBolt(draw, sim);
   drawPaved(draw, sim);
   drawJams(draw, sim);
 }
@@ -317,14 +386,135 @@ function drawWeirs(draw, sim) {
   }
 }
 
+function drawFloors(draw, sim) {
+  const ink = { court: INK.brass, store: INK.bark, cistern: 12, garden: INK.humus, hall: INK.soil };
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (n >= 28) break;
+    const name = cell.hearth ? '' : (cell.keepRoom || (cell.store ? 'store' : ''));
+    if (!name || !ink[name]) continue;
+    if (cell.planned && !sim.rooms?.some(room => room.cells.includes(cell))) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.012;
+    draw.streak(
+      [cell.x - 0.16, y, cell.z - 0.1],
+      [cell.x + 0.16, y, cell.z + 0.12],
+      stroke(ink[name], 0.05, { density: 1.6 })
+    );
+    if (cell.roofed) {
+      draw.point([cell.x, y + 0.02, cell.z], stroke(INK.charcoal, 0.08, { density: 1.2 }));
+    }
+  }
+}
+
+function drawStakes(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.planned || n >= 40) continue;
+    if (wallHeight(cell) >= 1.2) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.03;
+    const fade = Math.max(0.2, 1 - wallHeight(cell));
+    draw.streak(
+      [cell.x - 0.16, y, cell.z],
+      [cell.x - 0.04, y, cell.z],
+      stroke(INK.charcoal, 0.012 * fade)
+    );
+    draw.streak(
+      [cell.x + 0.04, y, cell.z],
+      [cell.x + 0.16, y, cell.z],
+      stroke(INK.charcoal, 0.012 * fade)
+    );
+  }
+}
+
+function drawGrates(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.grate || n >= 12) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.08;
+    for (let i = 0; i < 4; i++) {
+      const x = cell.x - 0.12 + i * 0.08;
+      draw.streak([x, y, cell.z - 0.12], [x, y + 0.22, cell.z + 0.12], stroke(5, 0.02));
+    }
+  }
+}
+
+function drawClay(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.clay || n >= 16) continue;
+    n += 1;
+    const y = walkHeight(cell) * 0.45 + cell.elevation * 0.55;
+    draw.streak(
+      [cell.x - 0.18, y, cell.z - 0.02],
+      [cell.x + 0.18, y + 0.04, cell.z + 0.02],
+      stroke(12, 0.05, { density: 1.8 })
+    );
+  }
+}
+
+function drawBeams(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!cell.beam || n >= 16) continue;
+    n += 1;
+    let top = walkHeight(cell) + 0.2;
+    for (const [di, dk] of STEP) {
+      const next = sim.cells[(cell.k + dk) * GRID + (cell.i + di)];
+      if (next && (next.cubes || 0) >= 2) top = Math.max(top, walkHeight(next) + 0.05);
+    }
+    draw.streak([cell.x - 0.28, top, cell.z], [cell.x + 0.28, top + 0.02, cell.z], stroke(5, 0.04));
+  }
+}
+
+function drawFire(draw, sim) {
+  let n = 0;
+  for (const cell of sim.cells) {
+    if (!((cell.fire || 0) > 0.08) || n >= 12) continue;
+    n += 1;
+    const y = walkHeight(cell) + 0.08;
+    const reach = 0.08 + cell.fire * 0.16;
+    draw.point([cell.x, y + reach, cell.z], stroke(INK.ember, 0.04, { density: 1.5, emissive: true }));
+    draw.streak(
+      [cell.x - 0.04, y, cell.z],
+      [cell.x + 0.02, y + 0.12 + reach, cell.z],
+      stroke(INK.brass, 0.02, { emissive: true })
+    );
+  }
+}
+
+function drawBolt(draw, sim) {
+  const bolt = sim.bolt;
+  if (!bolt || bolt.t < 0) return;
+  const k = Math.min(1, bolt.t / (bolt.dur || 0.4));
+  const fade = 1 - k;
+  const y0 = (bolt.y || 2.4);
+  const y1 = bolt.y * 0.25;
+  draw.streak(
+    [bolt.x, y0, bolt.z],
+    [bolt.x + 0.18, (y0 + y1) * 0.55, bolt.z - 0.12],
+    stroke(6, 0.03 * fade * (bolt.gain || 1), { density: 1.2, emissive: true })
+  );
+  draw.streak(
+    [bolt.x + 0.18, (y0 + y1) * 0.55, bolt.z - 0.12],
+    [bolt.x - 0.05, y1, bolt.z + 0.04],
+    stroke(6, 0.022 * fade, { density: 1.2, emissive: true })
+  );
+}
+
 function drawDoors(draw, sim) {
   let n = 0;
   for (const cell of sim.cells) {
     if (n >= 16) break;
     if (!cell.lintel && !cell.hurdle) continue;
     n += 1;
-    const y = walkHeight(cell) + (cell.cubes ? (cell.cubes || 0) * 0.5 : 0.55);
+    const y = walkHeight(cell) + (cell.cubes ? (cell.cubes || 0) * 0.45 : 0.62);
     if (cell.lintel) {
+      const post = stroke(5, 0.028);
+      draw.streak([cell.x - 0.2, cell.elevation + 0.08, cell.z], [cell.x - 0.2, y, cell.z], post);
+      draw.streak([cell.x + 0.2, cell.elevation + 0.08, cell.z], [cell.x + 0.2, y, cell.z], post);
       draw.streak([cell.x - 0.22, y, cell.z], [cell.x + 0.22, y + 0.02, cell.z], stroke(5, 0.042));
     }
     if (cell.hurdle) {
@@ -384,7 +574,7 @@ function drawRaces(draw, sim) {
     if ((!cell.race && !cell.river) || n >= 36) continue;
     n += 1;
     const y = cell.elevation + 0.03;
-    const ink = cell.river ? INK.sand : 12;
+    const ink = cell.moat ? INK.charcoal : (cell.river ? INK.sand : 12);
     draw.streak(
       [cell.x - 0.18, y, cell.z - 0.04],
       [cell.x + 0.16, y + 0.01, cell.z + 0.06],
@@ -405,25 +595,60 @@ function drawStore(draw, sim) {
   const cell = sim.cells[sim.store.k * GRID + sim.store.i];
   if (!cell) return;
   const sticks = sim.store.sticks || [];
-  const y = walkHeight(cell) + 0.06;
-  sticks.slice(0, 8).forEach((kind, index) => {
+  const y = walkHeight(cell) + 0.04;
+  // A keep store reads as a chest: dark body, brass latch, wood inside.
+  draw.streak([cell.x - 0.22, y, cell.z - 0.12], [cell.x + 0.22, y + 0.02, cell.z + 0.12], stroke(INK.bark, 0.11, { density: 2.6 }));
+  draw.streak([cell.x - 0.2, y + 0.08, cell.z - 0.1], [cell.x + 0.2, y + 0.12, cell.z + 0.1], stroke(5, 0.08, { density: 2.4 }));
+  draw.streak([cell.x - 0.18, y + 0.14, cell.z - 0.04], [cell.x + 0.18, y + 0.16, cell.z + 0.05], stroke(INK.charcoal, 0.05));
+  draw.point([cell.x, y + 0.1, cell.z + 0.02], stroke(INK.brass, 0.03, { density: 2.2, emissive: true }));
+  sticks.slice(0, 6).forEach((kind, index) => {
     const wood = woodOf(kind);
+    const lift = 0.03 + Math.floor(index / 2) * 0.035;
     const along = index % 2 === 0;
-    const lift = Math.floor(index / 2) * 0.05;
     if (along) {
       draw.streak(
-        [cell.x - wood.half * 0.7, y + lift, cell.z - 0.04],
-        [cell.x + wood.half * 0.7, y + lift + 0.01, cell.z + 0.04],
-        stroke(wood.color, 0.045)
+        [cell.x - wood.half * 0.45, y + lift, cell.z - 0.02],
+        [cell.x + wood.half * 0.45, y + lift + 0.01, cell.z + 0.02],
+        stroke(wood.color, 0.032)
       );
     } else {
       draw.streak(
-        [cell.x - 0.04, y + lift, cell.z - wood.half * 0.7],
-        [cell.x + 0.04, y + lift + 0.01, cell.z + wood.half * 0.7],
-        stroke(wood.color, 0.045)
+        [cell.x - 0.02, y + lift, cell.z - wood.half * 0.4],
+        [cell.x + 0.02, y + lift + 0.01, cell.z + wood.half * 0.4],
+        stroke(wood.color, 0.032)
       );
     }
   });
+}
+
+function drawPyres(draw, sim) {
+  let n = 0;
+  const night = nightAmount(sim.time || 0);
+  for (const cell of sim.cells) {
+    if (!(cell.pyre > 0) && !(cell.mist > 0.15)) continue;
+    if (n >= 18) break;
+    n += 1;
+    const y = walkHeight(cell) + 0.05;
+    if (cell.pyre > 0) {
+      // Crossed sticks, then a living flame.
+      draw.streak([cell.x - 0.16, y, cell.z - 0.08], [cell.x + 0.16, y + 0.02, cell.z + 0.1], stroke(INK.bark, 0.05));
+      draw.streak([cell.x - 0.1, y, cell.z + 0.14], [cell.x + 0.12, y + 0.03, cell.z - 0.12], stroke(5, 0.045));
+      const pulse = 0.7 + 0.3 * Math.sin((sim.time || 0) * 3.1 + cell.i);
+      const reach = 0.12 + Math.min(0.16, cell.pyre * 0.02) * pulse;
+      draw.point([cell.x, y + 0.1 + reach * 0.35, cell.z], stroke(INK.ember, 0.045 + night * 0.02, { density: 1.4, emissive: true }));
+      draw.point([cell.x + 0.03, y + 0.16 + reach * 0.5, cell.z - 0.02], stroke(INK.brass, 0.028, { density: 1.2, emissive: true }));
+      draw.streak(
+        [cell.x - 0.02, y + 0.08, cell.z],
+        [cell.x + 0.01, y + 0.18 + reach, cell.z + 0.01],
+        stroke(INK.ember, 0.03, { density: 1.5, emissive: true })
+      );
+    }
+    if ((cell.mist || 0) > 0.12) {
+      const lift = 0.22 + (cell.mist || 0) * 0.18;
+      draw.point([cell.x + 0.08, y + lift, cell.z - 0.04], stroke(6, 0.05, { density: 0.9, emissive: true }));
+      draw.point([cell.x - 0.06, y + lift * 0.85, cell.z + 0.07], stroke(6, 0.04, { density: 0.8, emissive: true }));
+    }
+  }
 }
 
 function drawWorn(draw, sim) {

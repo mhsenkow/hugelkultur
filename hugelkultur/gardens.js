@@ -58,6 +58,8 @@ export function updateGardens(sim, dt, playerDriving) {
   for (const plot of sim.plots) {
     if (plot.growth < 1) {
       let rate = GROW;
+      if (sim.drought && !(plot.watered > 0)) rate *= 0.15;
+      if (plot.watered > 0) plot.watered = Math.max(0, plot.watered - dt);
       for (const cell of sim.cells || []) {
         if (!cell.bees) continue;
         const gap = Math.hypot(cell.i - plot.i, cell.k - plot.k);
